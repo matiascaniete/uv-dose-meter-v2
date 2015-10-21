@@ -87,12 +87,31 @@ void setup()   {
   retrieveMemoryCumUV();
 }
 
-//Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
-void beep ()
-{
-  if (cumulatedUV > memoryCumUV && buzzStatus) {
-    tone(buzzerPin, 440, 200);
+void loop() {
+  switch (resetBtn.CheckButton(resetBtnPin))
+  {
+    case PRESSED:
+      resetCounter();
+      break;
+    case DOUBLE_PRESSED:
+      buzzStatus = !buzzStatus;
+      break;
+    case MULTI_PRESSED:
+      storeMemoryCumUV();
+      break;
   }
+
+  switch (memoryBtn.CheckButton(memoryBtnPin))
+  {
+    case PRESSED:
+      displayMode ++;
+      if (displayMode >= 3) {
+        displayMode = 0;
+      }
+      break;
+  }
+
+  t.update();
 }
 
 //Hace la lectura del sensor
@@ -281,29 +300,11 @@ void renderProgress(byte y, unsigned int percent) {
   }
 }
 
-void loop() {
-  switch (resetBtn.CheckButton(resetBtnPin))
-  {
-    case PRESSED:
-      resetCounter();
-      break;
-    case DOUBLE_PRESSED:
-      buzzStatus = !buzzStatus;
-      break;
-    case MULTI_PRESSED:
-      storeMemoryCumUV();
-      break;
-  }
+//Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
 
-  switch (memoryBtn.CheckButton(memoryBtnPin))
-  {
-    case PRESSED:
-      displayMode ++;
-      if (displayMode >= 3) {
-        displayMode = 0;
-      }
-      break;
+void beep ()
+{
+  if (cumulatedUV > memoryCumUV && buzzStatus) {
+    tone(buzzerPin, 440, 200);
   }
-
-  t.update();
 }
