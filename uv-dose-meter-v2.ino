@@ -1,30 +1,8 @@
 #include <EEPROM.h>
-
 #include <ButtonV2.h>
-
 #include <Event.h>
 #include <Timer.h>
-
 #include <Time.h>
-
-/*********************************************************************
-This is an example sketch for our Monochrome Nokia 5110 LCD Displays
-
-  Pick one up today in the adafruit shop!
-  ------> http://www.adafruit.com/products/338
-
-These displays use SPI to communicate, 4 or 5 pins are required to
-interface
-
-Adafruit invests time and resources providing this open source code,
-please support Adafruit and open-source hardware by purchasing
-products from Adafruit!
-
-Written by Limor Fried/Ladyada  for Adafruit Industries.
-BSD license, check license.txt for more information
-All text above, and the splash screen must be included in any redistribution
-*********************************************************************/
-
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
@@ -35,42 +13,36 @@ All text above, and the splash screen must be included in any redistribution
 // pin 5 - Data/Command select (D/C)
 // pin 4 - LCD chip select (CS)
 // pin 3 - LCD reset (RST)
+//inicialización del display (Nokia LCD 5110)
 Adafruit_PCD8544 display = Adafruit_PCD8544(7, 6, 5, 4, 3);
 
-// Hardware SPI (faster, but must use certain hardware pins):
-// SCK is LCD serial clock (SCLK) - this is pin 13 on Arduino Uno
-// MOSI is LCD DIN - this is pin 11 on an Arduino Uno
-// pin 5 - Data/Command select (D/C)
-// pin 4 - LCD chip select (CS)
-// pin 3 - LCD reset (RST)
-// Adafruit_PCD8544 display = Adafruit_PCD8544(5, 4, 3);
-// Note with hardware SPI MISO and SS pins aren't used but will still be read
-// and written to during SPI transfer.  Be careful sharing these pins!
+int sensorPin = A0;         //Pin del sensor UV
+int resetBtnPin = 8;        //Pin del boton de reseteo del timer
+int memoryBtnPin = 9;       //Pin del boton del modo de visualizacion
+int buzzerPin = 10;         //Pin del buzzer
+int ledPin = 13;            //Pin del Led indicador
 
-int sensorPin = A0;
-int resetBtnPin = 8;
-int memoryBtnPin = 9;
-int buzzerPin = 10;
-int ledPin = 13;
-
-unsigned int nReadings = 0;
-unsigned long int uvIntensity = 0;
-unsigned long int uvFilteredIntensity = 0;
-unsigned long int cumulatedUVFull = 0;
-unsigned long int cumulatedUV = 0;
-unsigned long int memoryCumUV = 10000;
-unsigned int minUV = 1023;
-unsigned int maxUV = 0;
+unsigned int nReadings = 0;                     //Numero de lecturas desde el momento de reset
+unsigned long int uvIntensity = 0;              //Intensidad actual UV
+unsigned long int uvFilteredIntensity = 0;      //Intensidad suavizada UV
+unsigned long int cumulatedUVFull = 0;          //Dosis UV total acumulada
+unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
+unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
+unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
+unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
 
 float vi = 0;
 
-byte buzzStatus = 1;
-byte displayMode = 0;
+byte buzzStatus = 1;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
+byte displayMode = 0;                           //Indica el modo de visualizacion:
+                                                //0: Mostrar tiempos
+                                                //1: Mostrar valores actuales de Intensidad
+                                                //2: Mostrar Dosis acumulada
 
-ButtonV2 resetBtn;
-ButtonV2 memoryBtn;
+ButtonV2 resetBtn;                              //Inicializacion del boton de Reset
+ButtonV2 memoryBtn;                             //Inicializacion del boton de Modo de visualizacion
 
-Timer t;
+Timer t;                                        //Inicializacion del timer
 
 void setup()   {
   display.begin();
@@ -79,30 +51,43 @@ void setup()   {
   // you can change the contrast around to adapt the display
   // for the best viewing!
   display.setContrast(50);
+
   setTime(0);
 
+  //Comportamiento de los pines de entrada y salida
   pinMode(sensorPin, INPUT);
   pinMode(resetBtnPin, INPUT_PULLUP);
   pinMode(memoryBtnPin, INPUT_PULLUP);
 
+  //Inicializacion de botones
   resetBtn.SetStateAndTime(LOW);
   memoryBtn.SetStateAndTime(LOW);
 
   pinMode(buzzerPin, OUTPUT);
   pinMode(ledPin, OUTPUT);
 
+  //Tono de Inicializacion
   tone(buzzerPin, 1000, 100);
   delay(100);
   tone(buzzerPin, 2000, 100);
 
   digitalWrite(ledPin, LOW);
+
+  //Definicion de las interrupciones por Software
+  //Hacer una lectura del valor UV 10 veces por segundo
   t.every(100, takeReading);
+
+  //Actualizar la informacion mostrada en pantalla 10 veces por segundo
   t.every(100, render);
+
+  //Sonar el buzzer cada 2 segundos (si se ha superado la Dosis limite)
   t.every(2000, beep);
 
+  //Lee el valor en memoria de la Dosis limite
   retrieveMemoryCumUV();
 }
 
+//Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
 void beep ()
 {
   if (cumulatedUV > memoryCumUV && buzzStatus) {
@@ -110,18 +95,19 @@ void beep ()
   }
 }
 
-
+//Hace la lectura del sensor
 void takeReading() {
-  int rawValue = 1023 - analogRead(sensorPin); //Valor crudo
-  float vf = (float) rawValue / 1023; // Valor normalizado
-  vf = vi + (vf - vi) * 0.1; // Valor Filtrado
-  uvIntensity = 100 * vf; // Valor normalizado a 100
-  vi = vf;
+  int rawValue = 1023 - analogRead(sensorPin);      // Valor crudo
+  float vf = (float) rawValue / 1023;               // Valor normalizado
+  vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
+  uvIntensity = 100 * vf;                           // Valor normalizado a 100
+  vi = vf;                                          // Necesario para el Filtrado
 
-  nReadings++;
-  cumulatedUVFull = cumulatedUVFull + uvIntensity;
-  cumulatedUV = cumulatedUVFull / 100;
+  nReadings++;                                      // Contador de lecturas
+  cumulatedUVFull = cumulatedUVFull + uvIntensity;  // Dosis acumulada
+  cumulatedUV = cumulatedUVFull / 100;              // 1% de la Dosis acumulada para evitar rebalse en el display
 
+  //Calculo del minimo y maximo de la Intensidad actual UV
   if (minUV > uvIntensity) {
     minUV = uvIntensity;
   }
@@ -131,6 +117,7 @@ void takeReading() {
   }
 }
 
+//Reset de variables
 void resetCounter() {
   setTime(0);
   uvIntensity = 0;
@@ -141,23 +128,26 @@ void resetCounter() {
   tone(buzzerPin, 1000, 100);
 }
 
+//Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
 void retrieveMemoryCumUV() {
   EEPROM.get(0, memoryCumUV);
 }
 
+//Almacenar la Dosis limite en memoria
 void storeMemoryCumUV() {
   memoryCumUV = cumulatedUV;
   EEPROM.put(0, memoryCumUV);
 }
 
+// utility function for digital clock display: prints preceding colon and leading 0
 void printDigits(int digits) {
-  // utility function for digital clock display: prints preceding colon and leading 0
   display.print(":");
   if (digits < 10)
     display.print('0');
   display.print(digits);
 }
 
+//Mostrar informacion de los tiempos en el display
 void renderTime(int what) {
   unsigned long int eta = now() * memoryCumUV / cumulatedUV;
   long int etl = eta - now();
@@ -196,6 +186,7 @@ void renderTime(int what) {
   }
 }
 
+//mostrar los valores actuales de Intensidad UV en el display
 void renderUV(int what) {
   switch (what)
   {
@@ -219,6 +210,7 @@ void renderUV(int what) {
   }
 }
 
+//mostrar informacion en pantalla
 void render() {
   display.clearDisplay();
   display.setTextSize(1);
@@ -270,9 +262,9 @@ void render() {
   renderProgress(43, 100 * cumulatedUV / memoryCumUV);
 
   display.display();
-
 }
 
+//mostrar una barra de progreso en el display, y = altura, percent = porcentaje a mostrar
 void renderProgress(byte y, unsigned int percent) {
   if (percent > 100) {
     percent = 100;
@@ -315,5 +307,3 @@ void loop() {
 
   t.update();
 }
-
-
