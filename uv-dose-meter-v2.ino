@@ -116,7 +116,7 @@ void loop() {
 
 //Hace la lectura del sensor
 void takeReading() {
-  int rawValue = 1023 - analogRead(sensorPin);      // Valor crudo
+  int rawValue = analogRead(sensorPin);      // Valor crudo
   float vf = (float) rawValue / 1023;               // Valor normalizado
   vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
   uvIntensity = 100 * vf;                           // Valor normalizado a 100
