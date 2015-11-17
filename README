@@ -1,2 +1,8 @@
 # uv-dose-meter-v2
 Segunda versión del código para el projecto "medidor de dosis correcta UV para cianotipos".
+
+TODO:
+
+Almacenar 6 o 12 valores (cada 10 o 5 min) automáticamente durante una hora de exposición
+de la tira de prueba para la calibración del medidor, que luego puedan visualizarse en el
+display para establecer la dosis que coincida con la franja correctamente expuesta.
