@@ -30,6 +30,8 @@ unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
 unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
+unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
+unsigned int multiplierValue = 3;               //Factor de multiplicacion del valor de entrada
 
 float vi = 0;
 
@@ -116,8 +118,9 @@ void loop() {
 
 //Hace la lectura del sensor
 void takeReading() {
-  int rawValue = analogRead(sensorPin);      // Valor crudo
-  float vf = (float) rawValue / 1023;               // Valor normalizado
+  int rawValue = analogRead(sensorPin) - tareValue; // Valor crudo
+  float vf = (float) rawValue / (1023 - tareValue); // Valor normalizado
+  vf = multiplierValue * vf;                        // Valor multiplicado
   vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
   uvIntensity = 100 * vf;                           // Valor normalizado a 100
   vi = vf;                                          // Necesario para el Filtrado
