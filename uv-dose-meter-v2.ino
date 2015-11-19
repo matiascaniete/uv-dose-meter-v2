@@ -6,6 +6,7 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
+#include <VirtualWire.h>
 
 // Software SPI (slower updates, more flexible pin options):
 // pin 7 - Serial clock out (SCLK)
@@ -21,6 +22,7 @@ int resetBtnPin = 8;        //Pin del boton de reseteo del timer
 int memoryBtnPin = 9;       //Pin del boton del modo de visualizacion
 int buzzerPin = 10;         //Pin del buzzer
 int ledPin = 13;            //Pin del Led indicador
+int rxPin = 11;             //Pin del receptor RF 433MHz
 
 unsigned int nReadings = 0;                     //Numero de lecturas desde el momento de reset
 unsigned long int uvIntensity = 0;              //Intensidad actual UV
@@ -31,15 +33,20 @@ unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en me
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
 unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
-unsigned int multiplierValue = 3;               //Factor de multiplicacion del valor de entrada
+unsigned int multiplierValue = 5;               //Factor de multiplicacion del valor de entrada
+unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
+
+String rfValue;                                 //Valor crudo de la ultima lectura RF
+int rfReading;                    //Valor numerico de la ultima lectura RF
 
 float vi = 0;
 
 byte buzzStatus = 1;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
+byte rfStatus = 0;                              //Indica si se están recibiendo datos desde el receptor RF
 byte displayMode = 0;                           //Indica el modo de visualizacion:
-                                                //0: Mostrar tiempos
-                                                //1: Mostrar valores actuales de Intensidad
-                                                //2: Mostrar Dosis acumulada
+//0: Mostrar tiempos
+//1: Mostrar valores actuales de Intensidad
+//2: Mostrar Dosis acumulada
 
 ButtonV2 resetBtn;                              //Inicializacion del boton de Reset
 ButtonV2 memoryBtn;                             //Inicializacion del boton de Modo de visualizacion
@@ -87,9 +94,43 @@ void setup()   {
 
   //Lee el valor en memoria de la Dosis limite
   retrieveMemoryCumUV();
+
+  Serial.begin(9600);  // Debugging only
+  Serial.println("setup");
+
+  // Init del receptor RF
+  vw_set_rx_pin(rxPin);
+  vw_setup(2000);       // Bits per sec
+  vw_rx_start();        // Start the receiver PLL running
 }
 
 void loop() {
+  uint8_t buf[VW_MAX_MESSAGE_LEN];
+  uint8_t buflen = VW_MAX_MESSAGE_LEN;
+
+  if (vw_get_message(buf, &buflen)) // Non-blocking
+  {
+    int i;
+    // Message with a good checksum received, print it.
+    //Serial.print("Got: ");
+    rfValue = "";
+    for (i = 0; i < buflen; i++)
+    {
+      rfValue = rfValue + char(buf[i]);
+      rfReading = rfValue.toInt();
+      //Serial.print(buf[i]);
+      //Serial.print(' ');
+    }
+    //Serial.println();
+    rfStatus = 1;
+    lastRFReading = millis();
+  }
+
+  //Si pasan mas de 5 segundos sin recibir datos RF...
+  if (millis() - lastRFReading > 5 * 1000) {
+    rfStatus = 0;
+  }
+
   switch (resetBtn.CheckButton(resetBtnPin))
   {
     case PRESSED:
@@ -103,11 +144,12 @@ void loop() {
       break;
   }
 
+
   switch (memoryBtn.CheckButton(memoryBtnPin))
   {
     case PRESSED:
       displayMode ++;
-      if (displayMode >= 3) {
+      if (displayMode > 3) {
         displayMode = 0;
       }
       break;
@@ -119,6 +161,11 @@ void loop() {
 //Hace la lectura del sensor
 void takeReading() {
   int rawValue = analogRead(sensorPin) - tareValue; // Valor crudo
+
+  //Si se reciben datos RF entonces priorizar su utilizacion
+  if (rfStatus) {
+    rawValue = rfReading;
+  }
   float vf = (float) rawValue / (1023 - tareValue); // Valor normalizado
   vf = multiplierValue * vf;                        // Valor multiplicado
   vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
@@ -271,13 +318,23 @@ void render() {
       display.print(100 * cumulatedUV / memoryCumUV);
       display.print("%");
       display.println();
+      break;
 
+    case 3:
+      display.println("--RF-INFO");
+      display.println(rfValue);
+      display.println(rfReading);
       break;
   }
 
   display.setCursor(84 - 5, 0);
   if (buzzStatus) {
     display.print("S");
+  }
+
+  display.setCursor(84 - 11, 0);
+  if (rfStatus) {
+    display.print("W");
   }
 
   renderProgress(39, 100 * uvIntensity / 100);
