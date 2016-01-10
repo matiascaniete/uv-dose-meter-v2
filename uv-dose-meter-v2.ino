@@ -15,14 +15,17 @@
 // pin 4 - LCD chip select (CS)
 // pin 3 - LCD reset (RST)
 //inicialización del display (Nokia LCD 5110)
-Adafruit_PCD8544 display = Adafruit_PCD8544(7, 6, 5, 4, 3);
+//Adafruit_PCD8544 display = Adafruit_PCD8544(7, 6, 5, 4, 3);
+Adafruit_PCD8544 display = Adafruit_PCD8544(2, 3, 4, 5, 6);
 
-int sensorPin = A0;         //Pin del sensor UV
+int joystickPin = A0;       //Pin del joystick
+int sensorPin = A1;         //Pin del sensor UV
 int resetBtnPin = 8;        //Pin del boton de reseteo del timer
 int memoryBtnPin = 9;       //Pin del boton del modo de visualizacion
 int buzzerPin = 10;         //Pin del buzzer
 int ledPin = 13;            //Pin del Led indicador
 int rxPin = 11;             //Pin del receptor RF 433MHz
+int lcdLightPin = 7;        //Pin del led del panel LCD
 
 unsigned int nReadings = 0;                     //Numero de lecturas desde el momento de reset
 unsigned long int uvIntensity = 0;              //Intensidad actual UV
@@ -32,8 +35,8 @@ unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
 unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
-unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
-unsigned int multiplierValue = 5;               //Factor de multiplicacion del valor de entrada
+unsigned int tareValue = 0;                   //"Valor zero" de calibración del sensor UV
+unsigned int multiplierValue = 1;               //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 
 String rfValue;                                 //Valor crudo de la ultima lectura RF
@@ -41,9 +44,9 @@ int rfReading;                    //Valor numerico de la ultima lectura RF
 
 float vi = 0;
 
-byte buzzStatus = 1;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
+byte buzzStatus = 0;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
 byte rfStatus = 0;                              //Indica si se están recibiendo datos desde el receptor RF
-byte displayMode = 0;                           //Indica el modo de visualizacion:
+byte displayMode = 1;                           //Indica el modo de visualizacion:
 //0: Mostrar tiempos
 //1: Mostrar valores actuales de Intensidad
 //2: Mostrar Dosis acumulada
@@ -52,6 +55,42 @@ ButtonV2 resetBtn;                              //Inicializacion del boton de Re
 ButtonV2 memoryBtn;                             //Inicializacion del boton de Modo de visualizacion
 
 Timer t;                                        //Inicializacion del timer
+
+
+//keypad debounce parameter
+#define DEBOUNCE_MAX 15
+#define DEBOUNCE_ON  10
+#define DEBOUNCE_OFF 3
+
+#define NUM_KEYS 5
+
+#define NUM_MENU_ITEM   4
+
+// joystick number
+#define LEFT_KEY 0
+#define CENTER_KEY 1
+#define DOWN_KEY 2
+#define RIGHT_KEY 3
+#define UP_KEY 4
+
+// menu starting points
+
+#define MENU_X  10      // 0-83
+#define MENU_Y  1       // 0-5
+
+
+int  adc_key_val[5] = {
+  50, 200, 400, 600, 800
+};
+
+// debounce counters
+byte button_count[NUM_KEYS];
+// button status - pressed/released
+byte button_status[NUM_KEYS];
+// button on flags for user program
+byte button_flag[NUM_KEYS];
+
+unsigned long buttonFlasher = 0;
 
 void setup()   {
   display.begin();
@@ -64,6 +103,7 @@ void setup()   {
   setTime(0);
 
   //Comportamiento de los pines de entrada y salida
+  pinMode(joystickPin, INPUT);
   pinMode(sensorPin, INPUT);
   pinMode(resetBtnPin, INPUT_PULLUP);
   pinMode(memoryBtnPin, INPUT_PULLUP);
@@ -74,6 +114,7 @@ void setup()   {
 
   pinMode(buzzerPin, OUTPUT);
   pinMode(ledPin, OUTPUT);
+  pinMode(lcdLightPin, OUTPUT);
 
   //Tono de Inicializacion
   tone(buzzerPin, 1000, 100);
@@ -81,6 +122,7 @@ void setup()   {
   tone(buzzerPin, 2000, 100);
 
   digitalWrite(ledPin, LOW);
+  digitalWrite(lcdLightPin, LOW);
 
   //Definicion de las interrupciones por Software
   //Hacer una lectura del valor UV 10 veces por segundo
@@ -156,8 +198,46 @@ void loop() {
   }
 
   t.update();
-}
 
+
+
+
+  byte i;
+  for (i = 0; i < NUM_KEYS; i++) {
+    if (button_flag[i] != 0) {
+      button_flag[i] = 0; // reset button flag
+      switch (i) {
+        case UP_KEY:
+          storeMemoryCumUV();
+          break;
+        case DOWN_KEY:
+          buzzStatus = !buzzStatus;
+          break;
+        case LEFT_KEY:
+          if (displayMode == 1) {
+            displayMode = 3;
+          } else {
+            displayMode --;
+          }
+          break;
+        case RIGHT_KEY:
+          displayMode ++;
+          if (displayMode > 3) {
+            displayMode = 0;
+          }
+          break;
+        case CENTER_KEY:
+          resetCounter();
+          break;
+      }
+    }
+  }
+  if (millis() - buttonFlasher > 5) {
+    update_adc_key();
+    buttonFlasher = millis();
+  }
+
+}
 //Hace la lectura del sensor
 void takeReading() {
   int rawValue = analogRead(sensorPin) - tareValue; // Valor crudo
@@ -362,9 +442,57 @@ void renderProgress(byte y, unsigned int percent) {
 
 //Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
 
-void beep ()
-{
+void beep () {
   if (cumulatedUV > memoryCumUV && buzzStatus) {
     tone(buzzerPin, 440, 200);
+  }
+}
+
+
+
+// which includes DEBOUNCE ON/OFF mechanism, and continuous pressing detection
+// Convert ADC value to key number
+
+char get_key(unsigned int input) {
+  char k;
+  for (k = 0; k < NUM_KEYS; k++) {
+    if (input < adc_key_val[k]) {
+      return k;
+    }
+  }
+
+  if (k >= NUM_KEYS)
+    k = -1;     // No valid key pressed
+
+  return k;
+}
+
+void update_adc_key() {
+  int adc_key_in;
+  char key_in;
+  byte i;
+
+  adc_key_in = analogRead(joystickPin);
+  key_in = get_key(adc_key_in);
+  for (i = 0; i < NUM_KEYS; i++) {
+    if (key_in == i) { //one key is pressed
+      if (button_count[i] < DEBOUNCE_MAX) {
+        button_count[i]++;
+        if (button_count[i] > DEBOUNCE_ON) {
+          if (button_status[i] == 0) {
+            button_flag[i] = 1;
+            button_status[i] = 1; //button debounced to 'pressed' status
+          }
+        }
+      }
+    } else { // no button pressed
+      if (button_count[i] > 0) {
+        button_flag[i] = 0;
+        button_count[i]--;
+        if (button_count[i] < DEBOUNCE_OFF) {
+          button_status[i] = 0; //button debounced to 'released' status
+        }
+      }
+    }
   }
 }
