@@ -121,7 +121,7 @@ void setup()   {
   delay(100);
   tone(buzzerPin, 2000, 100);
 
-  digitalWrite(ledPin, LOW);
+  digitalWrite(ledPin, HIGH);
   digitalWrite(lcdLightPin, LOW);
 
   //Definicion de las interrupciones por Software
@@ -275,6 +275,7 @@ void resetCounter() {
   minUV = 1023;
   maxUV = 0;
   tone(buzzerPin, 1000, 100);
+  digitalWrite(lcdLightPin, LOW);
 }
 
 //Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
@@ -372,14 +373,16 @@ void render() {
       renderTime(0);
       renderTime(1);
       renderTime(2);
-      display.print("NR:");
-      display.println(nReadings);
+      //display.print("NR:");
+     // display.println(nReadings);
+      renderProgress(43, 100 * cumulatedUV / memoryCumUV);
       break;
     case 1:
       display.println("--UV VALUES");
       renderUV(0);
       renderUV(1);
       renderUV(2);
+      renderProgress(43, 100 * uvIntensity / 100);
       break;
 
     case 2:
@@ -398,6 +401,7 @@ void render() {
       display.print(100 * cumulatedUV / memoryCumUV);
       display.print("%");
       display.println();
+      renderProgress(43, 100 * cumulatedUV / memoryCumUV);
       break;
 
     case 3:
@@ -416,9 +420,6 @@ void render() {
   if (rfStatus) {
     display.print("W");
   }
-
-  renderProgress(39, 100 * uvIntensity / 100);
-  renderProgress(43, 100 * cumulatedUV / memoryCumUV);
 
   display.display();
 }
@@ -441,10 +442,13 @@ void renderProgress(byte y, unsigned int percent) {
 }
 
 //Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
-
 void beep () {
-  if (cumulatedUV > memoryCumUV && buzzStatus) {
-    tone(buzzerPin, 440, 200);
+  if (cumulatedUV > memoryCumUV) {
+    if (buzzStatus) {
+      tone(buzzerPin, 440, 200);
+    }
+    int tmp = digitalRead(lcdLightPin);
+    digitalWrite(lcdLightPin, !tmp);
   }
 }
 
