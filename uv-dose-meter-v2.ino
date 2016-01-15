@@ -35,12 +35,12 @@ unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
 unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
-unsigned int tareValue = 0;                   //"Valor zero" de calibración del sensor UV
-unsigned int multiplierValue = 1;               //Factor de multiplicacion del valor de entrada
+unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
+unsigned int multiplierValue = 10;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 
 String rfValue;                                 //Valor crudo de la ultima lectura RF
-int rfReading;                    //Valor numerico de la ultima lectura RF
+int rfReading;                                  //Valor numerico de la ultima lectura RF
 
 float vi = 0;
 
@@ -154,16 +154,11 @@ void loop() {
   {
     int i;
     // Message with a good checksum received, print it.
-    //Serial.print("Got: ");
     rfValue = "";
-    for (i = 0; i < buflen; i++)
-    {
+    for (i = 0; i < buflen; i++) {
       rfValue = rfValue + char(buf[i]);
-      rfReading = rfValue.toInt();
-      //Serial.print(buf[i]);
-      //Serial.print(' ');
     }
-    //Serial.println();
+    rfReading = rfValue.toInt();
     rfStatus = 1;
     lastRFReading = millis();
   }
@@ -171,6 +166,8 @@ void loop() {
   //Si pasan mas de 5 segundos sin recibir datos RF...
   if (millis() - lastRFReading > 5 * 1000) {
     rfStatus = 0;
+    rfReading = 0;
+    rfValue = "";
   }
 
   switch (resetBtn.CheckButton(resetBtnPin))
@@ -374,7 +371,7 @@ void render() {
       renderTime(1);
       renderTime(2);
       //display.print("NR:");
-     // display.println(nReadings);
+      // display.println(nReadings);
       renderProgress(43, 100 * cumulatedUV / memoryCumUV);
       break;
     case 1:
@@ -406,7 +403,9 @@ void render() {
 
     case 3:
       display.println("--RF-INFO");
+      display.print("RAW-DATA:");
       display.println(rfValue);
+      display.print("VALUE   :");
       display.println(rfReading);
       break;
   }
