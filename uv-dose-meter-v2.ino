@@ -177,6 +177,7 @@ void loop() {
   for (i = 0; i < NUM_KEYS; i++) {
     if (button_flag[i] != 0) {
       button_flag[i] = 0; // reset button flag
+      
       switch (i) {
         case UP_KEY:
           storeMemoryCumUV();
@@ -339,7 +340,8 @@ void render() {
 
   switch (displayMode) {
     case 0:
-      display.println("--TIMINGS");
+      display.println("0:TIMINGS:");
+      display.println("");
       renderTime(0);
       renderTime(1);
       renderTime(2);
@@ -348,7 +350,8 @@ void render() {
       renderProgress(43, 100 * cumulatedUV / memoryCumUV);
       break;
     case 1:
-      display.println("--UV VALUES");
+      display.println("1:UV-VALUES:");
+      display.println("");
       renderUV(0);
       renderUV(1);
       renderUV(2);
@@ -356,7 +359,9 @@ void render() {
       break;
 
     case 2:
-      display.println("--DOSE");
+      display.println("2:DOSE:");
+      display.println("");
+      
       display.print("CURR:");
       display.print(cumulatedUV);
       display.print("");
@@ -375,7 +380,9 @@ void render() {
       break;
 
     case 3:
-      display.println("--RF-INFO");
+      display.println("3:RF-INFO:");
+      display.println("");
+
       display.print("RAW-DATA:");
       display.println(rfValue);
       display.print("VALUE   :");
