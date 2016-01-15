@@ -134,6 +134,8 @@ void setup()   {
   //Sonar el buzzer cada 2 segundos (si se ha superado la Dosis limite)
   t.every(2000, beep);
 
+  //Apaga la luz trasera cada 5 segundos.
+  t.every(5000, bkLightOff);
   //Lee el valor en memoria de la Dosis limite
   retrieveMemoryCumUV();
 
@@ -179,8 +181,7 @@ void loop() {
 
       //Enciende la luz trasera al pulsar cualquier boton
       digitalWrite(lcdLightPin, HIGH);
-      t.after(5000, bkLightOff);
-      
+
       switch (i) {
         case UP_KEY:
           storeMemoryCumUV();
