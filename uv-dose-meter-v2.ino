@@ -46,10 +46,11 @@ float vi = 0;
 
 byte buzzStatus = 0;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
 byte rfStatus = 0;                              //Indica si se están recibiendo datos desde el receptor RF
-byte displayMode = 1;                           //Indica el modo de visualizacion:
+int  displayMode = 2;                           //Indica el modo de visualizacion:
 //0: Mostrar tiempos
 //1: Mostrar valores actuales de Intensidad
 //2: Mostrar Dosis acumulada
+//3: Mostrar RF info
 
 ButtonV2 resetBtn;                              //Inicializacion del boton de Reset
 ButtonV2 memoryBtn;                             //Inicializacion del boton de Modo de visualizacion
@@ -170,34 +171,7 @@ void loop() {
     rfValue = "";
   }
 
-  switch (resetBtn.CheckButton(resetBtnPin))
-  {
-    case PRESSED:
-      resetCounter();
-      break;
-    case DOUBLE_PRESSED:
-      buzzStatus = !buzzStatus;
-      break;
-    case MULTI_PRESSED:
-      storeMemoryCumUV();
-      break;
-  }
-
-
-  switch (memoryBtn.CheckButton(memoryBtnPin))
-  {
-    case PRESSED:
-      displayMode ++;
-      if (displayMode > 3) {
-        displayMode = 0;
-      }
-      break;
-  }
-
   t.update();
-
-
-
 
   byte i;
   for (i = 0; i < NUM_KEYS; i++) {
@@ -211,10 +185,9 @@ void loop() {
           buzzStatus = !buzzStatus;
           break;
         case LEFT_KEY:
-          if (displayMode == 1) {
+          displayMode --;
+          if (displayMode < 0) {
             displayMode = 3;
-          } else {
-            displayMode --;
           }
           break;
         case RIGHT_KEY:
