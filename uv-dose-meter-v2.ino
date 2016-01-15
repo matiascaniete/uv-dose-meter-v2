@@ -57,7 +57,6 @@ ButtonV2 memoryBtn;                             //Inicializacion del boton de Mo
 
 Timer t;                                        //Inicializacion del timer
 
-
 //keypad debounce parameter
 #define DEBOUNCE_MAX 15
 #define DEBOUNCE_ON  10
@@ -177,6 +176,10 @@ void loop() {
   for (i = 0; i < NUM_KEYS; i++) {
     if (button_flag[i] != 0) {
       button_flag[i] = 0; // reset button flag
+
+      //Enciende la luz trasera al pulsar cualquier boton
+      digitalWrite(lcdLightPin, HIGH);
+      t.after(5000, bkLightOff);
       
       switch (i) {
         case UP_KEY:
@@ -207,8 +210,13 @@ void loop() {
     update_adc_key();
     buttonFlasher = millis();
   }
-
 }
+
+//
+void bkLightOff() {
+  digitalWrite(lcdLightPin, LOW);
+}
+
 //Hace la lectura del sensor
 void takeReading() {
   int rawValue = analogRead(sensorPin) - tareValue; // Valor crudo
@@ -361,7 +369,7 @@ void render() {
     case 2:
       display.println("2:DOSE:");
       display.println("");
-      
+
       display.print("CURR:");
       display.print(cumulatedUV);
       display.print("");
