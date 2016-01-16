@@ -261,7 +261,6 @@ void resetCounter() {
   minUV = 1023;
   maxUV = 0;
   tone(buzzerPin, 1000, 100);
-  digitalWrite(lcdLightPin, LOW);
 }
 
 //Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
