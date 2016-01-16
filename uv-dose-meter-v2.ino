@@ -39,8 +39,12 @@ unsigned int tareValue = 300;                   //"Valor zero" de calibración d
 unsigned int multiplierValue = 10;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 
-String rfValue;                                 //Valor crudo de la ultima lectura RF
+char StringReceived[22];                        //Valor crudo de la ultima lectura RF
+
 int rfReading;                                  //Valor numerico de la ultima lectura RF
+int rfBatteryLevel;
+int rfCounter;
+int rfControl;
 
 float vi = 0;
 
@@ -156,20 +160,23 @@ void loop() {
   {
     int i;
     // Message with a good checksum received, print it.
-    rfValue = "";
     for (i = 0; i < buflen; i++) {
-      rfValue = rfValue + char(buf[i]);
+      StringReceived[i] = char(buf[i]);
     }
-    rfReading = rfValue.toInt();
+    
+    sscanf(StringReceived, "%d,%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel, &rfControl); // Converts a string to an array
+
+    //rfReading = rfValue.toInt();
     rfStatus = 1;
     lastRFReading = millis();
   }
-
+  
+  memset( StringReceived, 0, sizeof( StringReceived));// This line is for reset the StringReceived
+  
   //Si pasan mas de 5 segundos sin recibir datos RF...
   if (millis() - lastRFReading > 5 * 1000) {
     rfStatus = 0;
     rfReading = 0;
-    rfValue = "";
   }
 
   t.update();
@@ -226,7 +233,7 @@ void takeReading() {
   if (rfStatus) {
     rawValue = rfReading - tareValue;
   }
-  
+
   float vf = (float) rawValue / (1023 - tareValue); // Valor normalizado
   vf = multiplierValue * vf;                        // Valor multiplicado
   vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
@@ -393,12 +400,19 @@ void render() {
       display.println("3:RF-INFO:");
       display.println("");
 
-      display.print("RAW-DATA:");
-      display.println(rfValue);
-      display.print("VALUE   :");
+      display.print("COUNTER :");
+      display.println(rfCounter);
+      
+      display.print("UV-VALUE:");
       display.println(rfReading);
-      display.print("VCC %   :");
-      display.println(map(readVcc(), 2700, 5000, 0, 100));
+      
+      display.print("R-BT-LVL:");
+      display.print(map(rfBatteryLevel, 2700, 5000, 0, 100));
+      display.println("%");
+
+      display.print("L-BT-LVL:");
+      display.print(map(readVcc(), 2700, 5000, 0, 100));
+      display.println("%");
       break;
   }
 
