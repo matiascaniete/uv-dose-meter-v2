@@ -38,6 +38,7 @@ unsigned int maxUV = 0;                         //Valor máximo de la Intensidad
 unsigned int tareValue = 300;                   //"Valor zero" de calibración del sensor UV
 unsigned int multiplierValue = 10;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
+unsigned long int lastKeypress;                 //Tiempo de la ultima keypressed
 
 char StringReceived[22];                        //Valor crudo de la ultima lectura RF
 
@@ -138,8 +139,6 @@ void setup()   {
   //Sonar el buzzer cada 2 segundos (si se ha superado la Dosis limite)
   t.every(2000, beep);
 
-  //Apaga la luz trasera cada 5 segundos.
-  t.every(5000, bkLightOff);
   //Lee el valor en memoria de la Dosis limite
   retrieveMemoryCumUV();
 
@@ -163,16 +162,16 @@ void loop() {
     for (i = 0; i < buflen; i++) {
       StringReceived[i] = char(buf[i]);
     }
-    
+
     sscanf(StringReceived, "%d,%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel, &rfControl); // Converts a string to an array
 
     //rfReading = rfValue.toInt();
     rfStatus = 1;
     lastRFReading = millis();
   }
-  
+
   memset( StringReceived, 0, sizeof( StringReceived));// This line is for reset the StringReceived
-  
+
   //Si pasan mas de 5 segundos sin recibir datos RF...
   if (millis() - lastRFReading > 5 * 1000) {
     rfStatus = 0;
@@ -186,8 +185,9 @@ void loop() {
     if (button_flag[i] != 0) {
       button_flag[i] = 0; // reset button flag
 
-      //Enciende la luz trasera al pulsar cualquier boton
+      //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
       digitalWrite(lcdLightPin, HIGH);
+      lastKeypress = millis();
 
       switch (i) {
         case UP_KEY:
@@ -218,11 +218,9 @@ void loop() {
     update_adc_key();
     buttonFlasher = millis();
   }
-}
-
-//
-void bkLightOff() {
-  digitalWrite(lcdLightPin, LOW);
+  if (millis() - lastKeypress > 10 * 1000) {
+    digitalWrite(lcdLightPin, LOW);
+  }
 }
 
 //Hace la lectura del sensor
@@ -402,10 +400,10 @@ void render() {
 
       display.print("COUNTER :");
       display.println(rfCounter);
-      
+
       display.print("UV-VALUE:");
       display.println(rfReading);
-      
+
       display.print("R-BT-LVL:");
       display.print(map(rfBatteryLevel, 2700, 5000, 0, 100));
       display.println("%");
@@ -452,16 +450,11 @@ void beep () {
     if (buzzStatus) {
       tone(buzzerPin, 440, 200);
     }
-    int tmp = digitalRead(lcdLightPin);
-    digitalWrite(lcdLightPin, !tmp);
   }
 }
 
-
-
 // which includes DEBOUNCE ON/OFF mechanism, and continuous pressing detection
 // Convert ADC value to key number
-
 char get_key(unsigned int input) {
   char k;
   for (k = 0; k < NUM_KEYS; k++) {
