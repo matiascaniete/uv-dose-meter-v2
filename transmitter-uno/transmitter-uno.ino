@@ -58,12 +58,14 @@ void loop()
 {
   char msg[4];
 
-  int uvLevel = analogRead(UVOUT);
-  int refLevel = analogRead(REF_3V3);
+  unsigned int uvLevel = analogRead(UVOUT);
+  unsigned int refLevel = analogRead(REF_3V3);
 
   //Use the 3.3V power pin as a reference to get a very accurate output value from sensor
   float outputVoltage = (3.3 / refLevel) * uvLevel;
-  value = String( int( mapfloat(outputVoltage, 0.97, 3.3, 0, 100)) );
+  value = String( int ( mapfloat(outputVoltage, 0.97, 3.3, 0, 100)) );
+  value = String( int (1023 * uvLevel / refLevel) );
+  value = String( int ( mapfloat( uvLevel, 0, refLevel, 0, 1023 )));
 
   for (int i = 0; i < value.length(); i++) {
     msg[i] = value[i];

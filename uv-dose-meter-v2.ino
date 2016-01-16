@@ -35,7 +35,7 @@ unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
 unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
-unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
+unsigned int tareValue = 300;                   //"Valor zero" de calibración del sensor UV
 unsigned int multiplierValue = 10;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 
@@ -220,12 +220,13 @@ void bkLightOff() {
 
 //Hace la lectura del sensor
 void takeReading() {
-  int rawValue = analogRead(sensorPin) - tareValue; // Valor crudo
+  int rawValue = analogRead(sensorPin) - tareValue;             // Valor crudo
 
   //Si se reciben datos RF entonces priorizar su utilizacion
   if (rfStatus) {
-    rawValue = rfReading;
+    rawValue = rfReading - tareValue;
   }
+  
   float vf = (float) rawValue / (1023 - tareValue); // Valor normalizado
   vf = multiplierValue * vf;                        // Valor multiplicado
   vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
@@ -321,14 +322,14 @@ void renderUV(int what) {
   switch (what)
   {
     case 0:
-      display.print("CURR:");
-      display.print(uvIntensity);
+      display.print("MIN :");
+      display.print(minUV);
       display.println();
       break;
 
     case 1:
-      display.print("MIN :");
-      display.print(minUV);
+      display.print("CURR:");
+      display.print(uvIntensity);
       display.println();
       break;
 
