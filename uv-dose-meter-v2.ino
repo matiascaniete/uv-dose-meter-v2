@@ -39,6 +39,7 @@ unsigned int tareValue = 300;                   //"Valor zero" de calibración d
 unsigned int multiplierValue = 10;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 unsigned long int lastKeypress;                 //Tiempo de la ultima keypressed
+int rawValue;                                   //Valor crudo de la lectura
 
 char StringReceived[22];                        //Valor crudo de la ultima lectura RF
 
@@ -175,7 +176,6 @@ void loop() {
   //Si pasan mas de 5 segundos sin recibir datos RF...
   if (millis() - lastRFReading > 5 * 1000) {
     rfStatus = 0;
-    rfReading = 0;
   }
 
   t.update();
@@ -225,7 +225,7 @@ void loop() {
 
 //Hace la lectura del sensor
 void takeReading() {
-  int rawValue = analogRead(sensorPin) - tareValue;             // Valor crudo
+  //int rawValue = analogRead(sensorPin) - tareValue;             // Valor crudo
 
   //Si se reciben datos RF entonces priorizar su utilizacion
   if (rfStatus) {
