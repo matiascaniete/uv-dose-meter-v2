@@ -49,7 +49,7 @@ void setup() {
   // Initialise the IO and ISR
   vw_set_tx_pin(txPin);
   pinMode(ledPin, OUTPUT);
-  vw_setup(2000);   // Bits per sec
+  vw_setup(4000);   // Bits per sec
 
   pinMode(UVOUT, INPUT);
   pinMode(REF_3V3, INPUT);
@@ -67,11 +67,12 @@ void loop() {
 
   sprintf(Sensor1CharMsg, "%d,%d,%d,", value, counter, batteryLevel);
 
-  digitalWrite(ledPin, HIGH);
   vw_send((uint8_t *)Sensor1CharMsg, strlen(Sensor1CharMsg));
   vw_wait_tx(); // Wait until the whole message is gone
+
+  digitalWrite(ledPin, HIGH);
+  delay(5);
   digitalWrite(ledPin, LOW);
-  delay(500);
 
 }
 

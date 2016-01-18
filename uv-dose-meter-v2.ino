@@ -35,8 +35,8 @@ unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
 unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
-unsigned int tareValue = 300;                   //"Valor zero" de calibración del sensor UV
-unsigned int multiplierValue = 10;              //Factor de multiplicacion del valor de entrada
+unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
+unsigned int multiplierValue = 05;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 unsigned long int lastKeypress;                 //Tiempo de la ultima keypressed
 int rawValue;                                   //Valor crudo de la lectura
@@ -44,9 +44,10 @@ int rawValue;                                   //Valor crudo de la lectura
 char StringReceived[22];                        //Valor crudo de la ultima lectura RF
 
 int rfReading;                                  //Valor numerico de la ultima lectura RF
-int rfBatteryLevel;
-int rfCounter;
-int rfControl;
+int rfBatteryLevel;                             //Valor remoto del nivel de bateria
+int rfCounter;                                  //Valor del contador de paquetes transmitidos
+int rfLocalCounter = 0;                         //Valor del contador local de paquetes, para el control de paquetes perdidos.
+int rfSignalQuality = 0;                        //Valor de la calidad de señal en funcion de los paquetes perdidos,
 
 float vi = 0;
 
@@ -83,7 +84,6 @@ Timer t;                                        //Inicializacion del timer
 
 #define MENU_X  10      // 0-83
 #define MENU_Y  1       // 0-5
-
 
 int  adc_key_val[5] = {
   50, 200, 400, 600, 800
@@ -128,17 +128,19 @@ void setup()   {
   tone(buzzerPin, 2000, 100);
 
   digitalWrite(ledPin, HIGH);
-  digitalWrite(lcdLightPin, LOW);
+  digitalWrite(lcdLightPin, HIGH);
 
   //Definicion de las interrupciones por Software
   //Hacer una lectura del valor UV 10 veces por segundo
   t.every(100, takeReading);
 
   //Actualizar la informacion mostrada en pantalla 10 veces por segundo
-  t.every(100, render);
+  t.every(500, render);
 
   //Sonar el buzzer cada 2 segundos (si se ha superado la Dosis limite)
   t.every(2000, beep);
+
+  t.every(1000, resetRFQualityCounter);
 
   //Lee el valor en memoria de la Dosis limite
   retrieveMemoryCumUV();
@@ -148,7 +150,7 @@ void setup()   {
 
   // Init del receptor RF
   vw_set_rx_pin(rxPin);
-  vw_setup(2000);       // Bits per sec
+  vw_setup(4000);       // Bits per sec
   vw_rx_start();        // Start the receiver PLL running
 }
 
@@ -156,17 +158,16 @@ void loop() {
   uint8_t buf[VW_MAX_MESSAGE_LEN];
   uint8_t buflen = VW_MAX_MESSAGE_LEN;
 
-  if (vw_get_message(buf, &buflen)) // Non-blocking
-  {
-    int i;
+  if (vw_get_message(buf, &buflen)) { // Non-blocking
     // Message with a good checksum received, print it.
-    for (i = 0; i < buflen; i++) {
+    for (int i = 0; i < buflen; i++) {
       StringReceived[i] = char(buf[i]);
     }
 
-    sscanf(StringReceived, "%d,%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel, &rfControl); // Converts a string to an array
+    int readStatus = sscanf(StringReceived, "%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel); // Converts a string to an array
 
-    //rfReading = rfValue.toInt();
+    rfLocalCounter++;
+
     rfStatus = 1;
     lastRFReading = millis();
   }
@@ -178,10 +179,7 @@ void loop() {
     rfStatus = 0;
   }
 
-  t.update();
-
-  byte i;
-  for (i = 0; i < NUM_KEYS; i++) {
+  for (byte i = 0; i < NUM_KEYS; i++) {
     if (button_flag[i] != 0) {
       button_flag[i] = 0; // reset button flag
 
@@ -214,13 +212,18 @@ void loop() {
       }
     }
   }
+
   if (millis() - buttonFlasher > 5) {
     update_adc_key();
     buttonFlasher = millis();
   }
-  if (millis() - lastKeypress > 10 * 1000) {
+
+  if (millis() - lastKeypress > 30 * 1000) {
     digitalWrite(lcdLightPin, LOW);
   }
+
+  t.update();
+
 }
 
 //Hace la lectura del sensor
@@ -287,8 +290,7 @@ void renderTime(int what) {
   unsigned long int eta = now() * memoryCumUV / cumulatedUV;
   long int etl = eta - now();
 
-  switch (what)
-  {
+  switch (what) {
     case 0:
       display.print("CURR:");
       display.print(hour());
@@ -350,6 +352,16 @@ void render() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(BLACK);
+
+  display.setCursor(84 - 11, 0);
+  if (rfStatus) {
+    display.print("w");
+  }
+
+  if (buzzStatus) {
+    display.print("s");
+  }
+
   display.setCursor(0, 0);
 
   switch (displayMode) {
@@ -397,31 +409,24 @@ void render() {
       display.println("3:RF-INFO:");
       display.println("");
 
-      display.print("COUNTER :");
-      display.println(rfCounter);
+      //display.print("COUNTER :");
+      //display.println(rfCounter);
+      display.print("SIGNAL Q:");
+      display.println(rfSignalQuality);
 
       display.print("UV-VALUE:");
       display.println(rfReading);
 
-      display.print("R-BT-LVL:");
-      display.print(map(rfBatteryLevel, 2700, 5000, 0, 100));
+      display.print("BAT-TX:");
+      display.print(constrain(map(rfBatteryLevel, 2700, 5000, 0, 100), 0 , 100));
       display.println("%");
 
-      display.print("L-BT-LVL:");
-      display.print(map(readVcc(), 2700, 5000, 0, 100));
+      display.print("BAT-RX:");
+      display.print(constrain(map(readVcc(), 2700, 5000, 0, 100), 0, 100));
       display.println("%");
       break;
   }
 
-  display.setCursor(84 - 5, 0);
-  if (buzzStatus) {
-    display.print("S");
-  }
-
-  display.setCursor(84 - 11, 0);
-  if (rfStatus) {
-    display.print("W");
-  }
 
   display.display();
 }
@@ -450,6 +455,11 @@ void beep () {
       tone(buzzerPin, 440, 200);
     }
   }
+}
+
+void resetRFQualityCounter() {
+  rfSignalQuality = rfLocalCounter;
+  rfLocalCounter = 0;
 }
 
 // which includes DEBOUNCE ON/OFF mechanism, and continuous pressing detection
