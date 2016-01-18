@@ -38,13 +38,12 @@ int UVOUT = A0; //Output from the sensor
 int REF_3V3 = A1; //3.3V power on the Arduino board
 
 const int ledPin = 13;
-const int txPin = 12;
+const int txPin = 4;
 
 char Sensor1CharMsg[21];// The string that we are going to send trought rf
 
 byte counter = 0;
 int batteryLevel = 0;
-int control = 0;
 
 void setup() {
   // Initialise the IO and ISR
@@ -66,11 +65,13 @@ void loop() {
   //Use the 3.3V power pin as a reference to get a very accurate output value from sensor
   int value =  int ( mapfloat( uvLevel, 0, refLevel, 0, 1023 ));
 
-  sprintf(Sensor1CharMsg, "%d,%d,%d,%d,", value, counter, batteryLevel, control);
+  sprintf(Sensor1CharMsg, "%d,%d,%d,", value, counter, batteryLevel);
 
+  digitalWrite(ledPin, HIGH);
   vw_send((uint8_t *)Sensor1CharMsg, strlen(Sensor1CharMsg));
   vw_wait_tx(); // Wait until the whole message is gone
-  delay(100);
+  digitalWrite(ledPin, LOW);
+  delay(500);
 
 }
 
