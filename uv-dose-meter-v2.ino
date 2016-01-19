@@ -1,5 +1,4 @@
 #include <EEPROM.h>
-#include <ButtonV2.h>
 #include <Event.h>
 #include <Timer.h>
 #include <Time.h>
@@ -20,8 +19,6 @@ Adafruit_PCD8544 display = Adafruit_PCD8544(2, 3, 4, 5, 6);
 
 int joystickPin = A0;       //Pin del joystick
 int sensorPin = A1;         //Pin del sensor UV
-int resetBtnPin = 8;        //Pin del boton de reseteo del timer
-int memoryBtnPin = 9;       //Pin del boton del modo de visualizacion
 int buzzerPin = 10;         //Pin del buzzer
 int ledPin = 13;            //Pin del Led indicador
 int rxPin = 11;             //Pin del receptor RF 433MHz
@@ -53,14 +50,19 @@ float vi = 0;
 
 byte buzzStatus = 0;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
 byte rfStatus = 0;                              //Indica si se están recibiendo datos desde el receptor RF
+
+#define DM_TIMES      0
+#define DM_INTENSITY  1
+#define DM_DOSIS      2
+#define DM_RF_INFO    3
+#define DM_BT_INFO    4
+
 int  displayMode = 2;                           //Indica el modo de visualizacion:
 //0: Mostrar tiempos
 //1: Mostrar valores actuales de Intensidad
 //2: Mostrar Dosis acumulada
 //3: Mostrar RF info
-
-ButtonV2 resetBtn;                              //Inicializacion del boton de Reset
-ButtonV2 memoryBtn;                             //Inicializacion del boton de Modo de visualizacion
+#define MAX_DISPLAY_MODES 5                     //Número de modos de visualización.
 
 Timer t;                                        //Inicializacion del timer
 
@@ -70,7 +72,6 @@ Timer t;                                        //Inicializacion del timer
 #define DEBOUNCE_OFF 3
 
 #define NUM_KEYS 5
-
 #define NUM_MENU_ITEM   4
 
 // joystick number
@@ -98,12 +99,13 @@ byte button_flag[NUM_KEYS];
 
 unsigned long buttonFlasher = 0;
 
+void (*buttonFunctionPtrs[NUM_KEYS][MAX_DISPLAY_MODES])(); //the array of function pointers for buttons
+void (*renderFunctionPtrs[MAX_DISPLAY_MODES])(); //the array of function pointers for diplay
+
 void setup()   {
   display.begin();
-  // init done
 
-  // you can change the contrast around to adapt the display
-  // for the best viewing!
+  // you can change the contrast around to adapt the display for the best viewing!
   display.setContrast(50);
 
   setTime(0);
@@ -111,12 +113,6 @@ void setup()   {
   //Comportamiento de los pines de entrada y salida
   pinMode(joystickPin, INPUT);
   pinMode(sensorPin, INPUT);
-  pinMode(resetBtnPin, INPUT_PULLUP);
-  pinMode(memoryBtnPin, INPUT_PULLUP);
-
-  //Inicializacion de botones
-  resetBtn.SetStateAndTime(LOW);
-  memoryBtn.SetStateAndTime(LOW);
 
   pinMode(buzzerPin, OUTPUT);
   pinMode(ledPin, OUTPUT);
@@ -152,79 +148,51 @@ void setup()   {
   vw_set_rx_pin(rxPin);
   vw_setup(4000);       // Bits per sec
   vw_rx_start();        // Start the receiver PLL running
+
+  // Definicion de los punteros de funciones de manejo de botones de navegacion y renderizacion
+  buttonFunctionPtrs[UP_KEY][DM_DOSIS] = increaseTargetDosis;
+  buttonFunctionPtrs[DOWN_KEY][DM_DOSIS] = decreaseTargetDosis;
+  buttonFunctionPtrs[CENTER_KEY][DM_DOSIS] = storeMemoryCumUV;
+
+  buttonFunctionPtrs[CENTER_KEY][DM_INTENSITY] = resetCounter;
+  buttonFunctionPtrs[CENTER_KEY][DM_TIMES] = resetCounter;
+
+  renderFunctionPtrs[DM_TIMES] = renderTime;
+  renderFunctionPtrs[DM_DOSIS] = renderDosis;
+  renderFunctionPtrs[DM_INTENSITY] = renderUV;
+  renderFunctionPtrs[DM_RF_INFO] = renderRFInfo;
 }
 
-void loop() {
-  uint8_t buf[VW_MAX_MESSAGE_LEN];
-  uint8_t buflen = VW_MAX_MESSAGE_LEN;
-
-  if (vw_get_message(buf, &buflen)) { // Non-blocking
-    // Message with a good checksum received, print it.
-    for (int i = 0; i < buflen; i++) {
-      StringReceived[i] = char(buf[i]);
-    }
-
-    int readStatus = sscanf(StringReceived, "%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel); // Converts a string to an array
-
-    rfLocalCounter++;
-
-    rfStatus = 1;
-    lastRFReading = millis();
-  }
-
-  memset( StringReceived, 0, sizeof( StringReceived));// This line is for reset the StringReceived
-
-  //Si pasan mas de 5 segundos sin recibir datos RF...
-  if (millis() - lastRFReading > 5 * 1000) {
-    rfStatus = 0;
-  }
-
-  for (byte i = 0; i < NUM_KEYS; i++) {
-    if (button_flag[i] != 0) {
-      button_flag[i] = 0; // reset button flag
-
-      //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
-      digitalWrite(lcdLightPin, HIGH);
-      lastKeypress = millis();
-
-      switch (i) {
-        case UP_KEY:
-          storeMemoryCumUV();
-          break;
-        case DOWN_KEY:
-          buzzStatus = !buzzStatus;
-          break;
-        case LEFT_KEY:
-          displayMode --;
-          if (displayMode < 0) {
-            displayMode = 3;
-          }
-          break;
-        case RIGHT_KEY:
-          displayMode ++;
-          if (displayMode > 3) {
-            displayMode = 0;
-          }
-          break;
-        case CENTER_KEY:
-          resetCounter();
-          break;
-      }
-    }
-  }
-
-  if (millis() - buttonFlasher > 5) {
-    update_adc_key();
-    buttonFlasher = millis();
-  }
-
-  if (millis() - lastKeypress > 30 * 1000) {
-    digitalWrite(lcdLightPin, LOW);
-  }
-
-  t.update();
-
+void increaseTargetDosis() {
+  memoryCumUV++;
 }
+
+void decreaseTargetDosis() {
+  memoryCumUV--;
+}
+
+//Reset de variables
+void resetCounter() {
+  setTime(0);
+  uvIntensity = 0;
+  cumulatedUVFull = 0;
+  nReadings = 0;
+  minUV = 1023;
+  maxUV = 0;
+  tone(buzzerPin, 1000, 100);
+}
+
+//Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
+void retrieveMemoryCumUV() {
+  EEPROM.get(0, memoryCumUV);
+}
+
+//Almacenar la Dosis limite en memoria
+void storeMemoryCumUV() {
+  //memoryCumUV = cumulatedUV;
+  EEPROM.put(0, memoryCumUV);
+}
+
 
 //Hace la lectura del sensor
 void takeReading() {
@@ -255,28 +223,6 @@ void takeReading() {
   }
 }
 
-//Reset de variables
-void resetCounter() {
-  setTime(0);
-  uvIntensity = 0;
-  cumulatedUVFull = 0;
-  nReadings = 0;
-  minUV = 1023;
-  maxUV = 0;
-  tone(buzzerPin, 1000, 100);
-}
-
-//Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
-void retrieveMemoryCumUV() {
-  EEPROM.get(0, memoryCumUV);
-}
-
-//Almacenar la Dosis limite en memoria
-void storeMemoryCumUV() {
-  memoryCumUV = cumulatedUV;
-  EEPROM.put(0, memoryCumUV);
-}
-
 // utility function for digital clock display: prints preceding colon and leading 0
 void printDigits(int digits) {
   display.print(":");
@@ -285,65 +231,44 @@ void printDigits(int digits) {
   display.print(digits);
 }
 
-//Mostrar informacion de los tiempos en el display
-void renderTime(int what) {
-  unsigned long int eta = now() * memoryCumUV / cumulatedUV;
-  long int etl = eta - now();
-
-  switch (what) {
-    case 0:
-      display.print("CURR:");
-      display.print(hour());
-      printDigits(minute());
-      printDigits(second());
-      display.println();
-      break;
-
-    case 1:
-      display.print("LEFT:");
-      if (etl < 0) {
-        String v = ((second() % 2) == 0) ? "0:00:00" : "-:--:--";
-        display.println(v);
-      }
-      else {
-        display.print(hour(etl));
-        printDigits(minute(etl));
-        printDigits(second(etl));
-        display.println();
-      }
-      break;
-
-    case 2:
-      display.print("ESTI:");
-      display.print(hour(eta));
-      printDigits(minute(eta));
-      printDigits(second(eta));
-      display.println();
-      break;
-  }
+void printTitle(String title) {
+  display.println(title);
+  display.println("");
 }
 
-//mostrar los valores actuales de Intensidad UV en el display
-void renderUV(int what) {
-  switch (what)
-  {
-    case 0:
-      display.print("MIN :");
-      display.print(minUV);
-      display.println();
-      break;
+void printField(String label, String value, String suffix = "") {
+  display.print(label);
+  display.print(value);
+  if (suffix) {
+    display.print(" ");
+    display.print(suffix);
+  }
+  display.println();
+}
 
-    case 1:
-      display.print("CURR:");
-      display.print(uvIntensity);
-      display.println();
-      break;
+void printTime(String label, int h, int m, int s) {
+  display.print(label);
+  display.print(h);
+  printDigits(m);
+  printDigits(s);
+  display.println();
+}
 
-    case 2:
-      display.print("MAX :");
-      display.print(maxUV);
-      display.println();
-      break;
+//mostrar una barra de progreso en el display, y = altura, percent = porcentaje a mostrar
+void renderProgress(byte y, unsigned int percent) {
+  if (percent > 100) {
+    percent = 100;
+  }
+
+  display.drawRect(0, y, 84, 5, BLACK);
+  for (int i = 0; i < (80 * percent / 100); i++) {
+    if (percent == 100) {
+      if ((second() % 2) == 0) {
+        display.drawPixel(i + 2, y + 2, BLACK);
+      }
+    } else {
+      display.drawPixel(i + 2, y + 2, BLACK);
+    }
   }
 }
 
@@ -364,88 +289,11 @@ void render() {
 
   display.setCursor(0, 0);
 
-  switch (displayMode) {
-    case 0:
-      display.println("0:TIMINGS:");
-      display.println("");
-      renderTime(0);
-      renderTime(1);
-      renderTime(2);
-      //display.print("NR:");
-      // display.println(nReadings);
-      renderProgress(43, 100 * cumulatedUV / memoryCumUV);
-      break;
-    case 1:
-      display.println("1:UV-VALUES:");
-      display.println("");
-      renderUV(0);
-      renderUV(1);
-      renderUV(2);
-      renderProgress(43, 100 * uvIntensity / 100);
-      break;
-
-    case 2:
-      display.println("2:DOSE:");
-      display.println("");
-
-      display.print("CURR:");
-      display.print(cumulatedUV);
-      display.print("");
-      display.println();
-
-      display.print("TARG:");
-      display.print(memoryCumUV);
-      display.print("");
-      display.println();
-
-      display.print("PERC:");
-      display.print(100 * cumulatedUV / memoryCumUV);
-      display.print("%");
-      display.println();
-      renderProgress(43, 100 * cumulatedUV / memoryCumUV);
-      break;
-
-    case 3:
-      display.println("3:RF-INFO:");
-      display.println("");
-
-      //display.print("COUNTER :");
-      //display.println(rfCounter);
-      display.print("SIGNAL Q:");
-      display.println(rfSignalQuality);
-
-      display.print("UV-VALUE:");
-      display.println(rfReading);
-
-      display.print("BAT-TX:");
-      display.print(constrain(map(rfBatteryLevel, 2700, 5000, 0, 100), 0 , 100));
-      display.println("%");
-
-      display.print("BAT-RX:");
-      display.print(constrain(map(readVcc(), 2700, 5000, 0, 100), 0, 100));
-      display.println("%");
-      break;
+  if (*renderFunctionPtrs[displayMode]) {
+    (*renderFunctionPtrs[displayMode])();
   }
-
 
   display.display();
-}
-
-//mostrar una barra de progreso en el display, y = altura, percent = porcentaje a mostrar
-void renderProgress(byte y, unsigned int percent) {
-  if (percent > 100) {
-    percent = 100;
-  }
-  display.drawRect(0, y, 84, 5, BLACK);
-  for (int i = 0; i < (80 * percent / 100); i++) {
-    if (percent == 100) {
-      if ((second() % 2) == 0) {
-        display.drawPixel(i + 2, y + 2, BLACK);
-      }
-    } else {
-      display.drawPixel(i + 2, y + 2, BLACK);
-    }
-  }
 }
 
 //Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
@@ -479,13 +327,9 @@ char get_key(unsigned int input) {
 }
 
 void update_adc_key() {
-  int adc_key_in;
-  char key_in;
-  byte i;
-
-  adc_key_in = analogRead(joystickPin);
-  key_in = get_key(adc_key_in);
-  for (i = 0; i < NUM_KEYS; i++) {
+  int adc_key_in = analogRead(joystickPin);
+  char key_in = get_key(adc_key_in);
+  for (byte i = 0; i < NUM_KEYS; i++) {
     if (key_in == i) { //one key is pressed
       if (button_count[i] < DEBOUNCE_MAX) {
         button_count[i]++;
@@ -533,3 +377,121 @@ long readVcc() {
   result = 1125300L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
   return result; // Vcc in millivolts
 }
+
+void loop() {
+  uint8_t buf[VW_MAX_MESSAGE_LEN];
+  uint8_t buflen = VW_MAX_MESSAGE_LEN;
+
+  if (vw_get_message(buf, &buflen)) { // Non-blocking
+    // Message with a good checksum received, print it.
+    for (int i = 0; i < buflen; i++) {
+      StringReceived[i] = char(buf[i]);
+    }
+
+    int readStatus = sscanf(StringReceived, "%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel); // Converts a string to an array
+
+    rfLocalCounter++;
+
+    rfStatus = 1;
+    lastRFReading = millis();
+  }
+
+  memset( StringReceived, 0, sizeof( StringReceived));// This line is for reset the StringReceived
+
+  //Si pasan mas de 5 segundos sin recibir datos RF...
+  if (millis() - lastRFReading > 5 * 1000) {
+    rfStatus = 0;
+  }
+
+  for (byte i = 0; i < NUM_KEYS; i++) {
+    if (button_status[i] != 0) {
+      if (*buttonFunctionPtrs[i][displayMode]) {
+        //(*buttonFunctionPtrs[i][displayMode])();
+        //delay(10);
+      }
+    }
+
+    if (button_flag[i] != 0) {
+      button_flag[i] = 0; // reset button flag
+
+      //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
+      digitalWrite(lcdLightPin, HIGH);
+      lastKeypress = millis();
+
+      if (*buttonFunctionPtrs[i][displayMode]) {
+        (*buttonFunctionPtrs[i][displayMode])();
+      }
+
+      switch (i) {
+        case LEFT_KEY:
+          displayMode --;
+          if (displayMode < 0) {
+            displayMode = MAX_DISPLAY_MODES - 1;
+          }
+          break;
+        case RIGHT_KEY:
+          displayMode ++;
+          if (displayMode > MAX_DISPLAY_MODES - 1) {
+            displayMode = 0;
+          }
+          break;
+      }
+    }
+  }
+
+  if (millis() - buttonFlasher > 5) {
+    update_adc_key();
+    buttonFlasher = millis();
+  }
+
+  if (millis() - lastKeypress > 30 * 1000) {
+    digitalWrite(lcdLightPin, LOW);
+  }
+
+  t.update();
+}
+
+//Mostrar informacion de los tiempos en el display
+void renderTime() {
+  unsigned long int eta = now() * memoryCumUV / cumulatedUV;
+  long int etl = eta - now();
+
+  printTitle("TIMINGS");
+  printTime("CURR:", hour(), minute(), second());
+
+  if (etl < 0) {
+    String v = ((second() % 2) == 0) ? "0:00:00" : "-:--:--";
+    printField("LEFT:", v);
+  } else {
+    printTime("LEFT:", hour(etl), minute(etl), second(etl));
+  }
+
+  printTime("ESTI:", hour(eta), minute(eta), second(eta));
+  renderProgress(43, 100 * cumulatedUV / memoryCumUV);
+}
+
+//mostrar los valores actuales de Intensidad UV en el display
+void renderUV() {
+  printTitle("UV-VALUES");
+  printField("MIN :", String(minUV));
+  printField("CURR:", String(uvIntensity));
+  printField("MAX :", String(maxUV));
+  renderProgress(43, 100 * uvIntensity / 100);
+}
+
+void renderRFInfo() {
+  printTitle("RF-INFO");
+  printField("SIGNAL Q:", String(rfSignalQuality));
+  printField("UV-VALUE:", String(rfReading));
+  printField("BAT-TX:", String(constrain(map(rfBatteryLevel, 2700, 5000, 0, 100), 0 , 100)), "%");
+  printField("BAT-RX:", String(constrain(map(readVcc(), 2700, 5000, 0, 100), 0, 100)), "%");
+}
+
+void renderDosis() {
+  printTitle("DOSIS");
+  printField("CURR:", String(cumulatedUV));
+  printField("TARG:", String(memoryCumUV));
+  printField("PERC:", String(100 * cumulatedUV / memoryCumUV), "%");
+  renderProgress(43, 100 * cumulatedUV / memoryCumUV);
+}
+
