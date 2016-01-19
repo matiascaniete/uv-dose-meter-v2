@@ -72,7 +72,6 @@ Timer t;                                        //Inicializacion del timer
 #define DEBOUNCE_OFF 3
 
 #define NUM_KEYS 5
-#define NUM_MENU_ITEM   4
 
 // joystick number
 #define LEFT_KEY 0
@@ -80,11 +79,6 @@ Timer t;                                        //Inicializacion del timer
 #define DOWN_KEY 2
 #define RIGHT_KEY 3
 #define UP_KEY 4
-
-// menu starting points
-
-#define MENU_X  10      // 0-83
-#define MENU_Y  1       // 0-5
 
 int  adc_key_val[5] = {
   50, 200, 400, 600, 800
