@@ -18,23 +18,20 @@
 //Adafruit_PCD8544 display = Adafruit_PCD8544(7, 6, 5, 4, 3);
 Adafruit_PCD8544 display = Adafruit_PCD8544(2, 3, 4, 5, 6);
 
-int joystickPin = A0;       //Pin del joystick
-int sensorPin = A1;         //Pin del sensor UV
-int buzzerPin = 10;         //Pin del buzzer
-int ledPin = 13;            //Pin del Led indicador
-int rxPin = 11;             //Pin del receptor RF 433MHz
-int lcdLightPin = 7;        //Pin del led del panel LCD
+int joystickPin =   A0; //Pin del joystick
+int sensorPin =     A1; //Pin del sensor UV
+int buzzerPin =     10; //Pin del buzzer
+int ledPin =        13; //Pin del Led indicador
+int rxPin =         11; //Pin del receptor RF 433MHz
+int lcdLightPin =   7;  //Pin del led del panel LCD
 
 unsigned int nReadings = 0;                     //Numero de lecturas desde el momento de reset
 unsigned long int uvIntensity = 0;              //Intensidad actual UV
 unsigned long int uvFilteredIntensity = 0;      //Intensidad suavizada UV
 unsigned long int cumulatedUVFull = 0;          //Dosis UV total acumulada
 unsigned long int cumulatedUV = 0;              //1% de la dosis total acumulada
-unsigned long int memoryCumUV = 10000;          //Dosis límite almacenada en memoria EEPROM
 unsigned int minUV = 1023;                      //Valor minimo de la Intensidad UV desde el momento de reset
 unsigned int maxUV = 0;                         //Valor máximo de la Intensidad UV desde el momento de reset
-unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
-unsigned int multiplierValue = 05;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
 int rawValue;                                   //Valor crudo de la lectura
 unsigned int localBatteryLevel = 0;             //Valor Vcc
@@ -49,30 +46,49 @@ int rfSignalQuality = 0;                        //Valor de la calidad de señal 
 
 unsigned long int rfMissing = 0;
 
+// ID of the settings block
+#define CONFIG_VERSION "vs2"
+
+// Tell it where to store your config data in EEPROM
+#define CONFIG_START 32
+
+// Example settings structure
+struct StoreStruct {
+  // This is for mere detection if they are your settings
+  char version[4];
+  // The variables of settings
+  unsigned int tareValue;                 //"Valor zero" de calibración del sensor UV
+  unsigned int multiplierValue;           //Factor de multiplicacion del valor de entrada
+  unsigned long int memoryCumUV;          //Dosis límite almacenada en memoria EEPROM
+} storage = {
+  CONFIG_VERSION,
+  202,
+  10,
+  100
+};
+
 float vi = 0;
 
 int note[7] = {440, 493, 523, 587, 659, 698, 784};
 byte buzzStatus = 0;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
 byte rfStatus = 0;                              //Indica si se están recibiendo datos desde el receptor RF
 
-#define DM_TIMES      0
-#define DM_INTENSITY  1
-#define DM_DOSIS      2
-#define DM_RF_INFO    3
-#define DM_BT_INFO    4
+#define DM_TIMES          0       //Mostrar tiempos
+#define DM_INTENSITY      1       //Mostrar valores actuales de Intensidad
+#define DM_DOSIS          2       //Mostrar Dosis acumulada
+#define DM_RF_INFO        3       //Mostrar RF info
+#define DM_BT_INFO        4       //Mostrar informacion de baterias
+#define DM_CONFIG_INFO    5       //Mostrar valores de configuracion
+#define MAX_DISPLAY_MODES 6       //Número de modos de visualización.
 
-int  displayMode = 2;                           //Indica el modo de visualizacion:
-//0: Mostrar tiempos
-//1: Mostrar valores actuales de Intensidad
-//2: Mostrar Dosis acumulada
-//3: Mostrar RF info
-#define MAX_DISPLAY_MODES 5                     //Número de modos de visualización.
+//Indica el modo de visualizacion actual
+int  displayMode = DM_TIMES;
 
 Timer t;                                        //Inicializacion del timer
 FiveDegreeButton fdb = FiveDegreeButton(joystickPin);
 
-void (*buttonFunctionPtrs[MAX_DISPLAY_MODES][NUM_KEYS])(); //the array of function pointers for buttons
-void (*renderFunctionPtrs[MAX_DISPLAY_MODES])(); //the array of function pointers for diplay
+void (*buttonFunctionPtrs[MAX_DISPLAY_MODES * NUM_KEYS])(); //the array of function pointers for buttons
+void (*renderFunctionPtrs[MAX_DISPLAY_MODES])(); //the array of function pointers for display
 
 void setup() {
   display.begin();
@@ -110,11 +126,8 @@ void setup() {
 
   t.every(1000, resetRFQualityCounter);
 
-  //Lee el valor en memoria de la Dosis limite
-  retrieveMemoryCumUV();
-
-  //Serial.begin(9600);  // Debugging only
-  //Serial.println("setup");
+  //Lee el valor en memoria de la configuracion
+  loadConfig();
 
   // Init del receptor RF
   vw_set_rx_pin(rxPin);
@@ -122,17 +135,18 @@ void setup() {
   vw_rx_start();        // Start the receiver PLL running
 
   // Definicion de los punteros de funciones de manejo de botones de navegacion y renderizacion
-  buttonFunctionPtrs[UP_KEY][DM_DOSIS] = increaseTargetDosis;
-  buttonFunctionPtrs[DOWN_KEY][DM_DOSIS] = decreaseTargetDosis;
-  buttonFunctionPtrs[CENTER_KEY][DM_DOSIS] = storeMemoryCumUV;
 
-  buttonFunctionPtrs[CENTER_KEY][DM_INTENSITY] = resetCounter;
-  buttonFunctionPtrs[CENTER_KEY][DM_TIMES] = resetCounter;
-  buttonFunctionPtrs[CENTER_KEY][DM_RF_INFO] = resetRF;
+  buttonFunctionPtrs[UP_KEY + NUM_KEYS * DM_DOSIS] = increaseTargetDosis;
+  buttonFunctionPtrs[DOWN_KEY + NUM_KEYS * DM_DOSIS] = decreaseTargetDosis;
+  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_DOSIS] = saveConfig;
+
+  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_INTENSITY] = resetCounter;
+  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_TIMES] = resetCounter;
+  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_RF_INFO] = resetRF;
 
   for (byte i = 0; i < MAX_DISPLAY_MODES; i++) {
-    buttonFunctionPtrs[RIGHT_KEY][i] = increaseMenu;
-    buttonFunctionPtrs[LEFT_KEY][i] = decreaseMenu;
+    buttonFunctionPtrs[RIGHT_KEY + i * NUM_KEYS] = increaseMenu;
+    buttonFunctionPtrs[LEFT_KEY + i * NUM_KEYS] = decreaseMenu;
   }
 
   renderFunctionPtrs[DM_TIMES] = renderTime;
@@ -140,6 +154,10 @@ void setup() {
   renderFunctionPtrs[DM_INTENSITY] = renderUV;
   renderFunctionPtrs[DM_RF_INFO] = renderRFInfo;
   renderFunctionPtrs[DM_BT_INFO] = renderBatteryInfo;
+  renderFunctionPtrs[DM_CONFIG_INFO] = renderConfig;
+
+  Serial.begin(9600);  // Debugging only
+  Serial.println("setup");
 }
 
 void increaseMenu() {
@@ -156,11 +174,11 @@ void decreaseMenu() {
   }
 }
 void increaseTargetDosis() {
-  memoryCumUV++;
+  storage.memoryCumUV++;
 }
 
 void decreaseTargetDosis() {
-  memoryCumUV--;
+  storage.memoryCumUV--;
 }
 
 //Reset de variables
@@ -178,14 +196,19 @@ void resetRF() {
 }
 
 //Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
-void retrieveMemoryCumUV() {
-  EEPROM.get(0, memoryCumUV);
+void loadConfig() {
+  // To make sure there are settings, and they are YOURS!
+  // If nothing is found it will use the default settings.
+  if (EEPROM.read(CONFIG_START + 0) == CONFIG_VERSION[0] &&
+      EEPROM.read(CONFIG_START + 1) == CONFIG_VERSION[1] &&
+      EEPROM.read(CONFIG_START + 2) == CONFIG_VERSION[2])
+    for (unsigned int t = 0; t < sizeof(storage); t++)
+      *((char*)&storage + t) = EEPROM.read(CONFIG_START + t);
 }
 
-//Almacenar la Dosis limite en memoria
-void storeMemoryCumUV() {
-  //memoryCumUV = cumulatedUV;
-  EEPROM.put(0, memoryCumUV);
+void saveConfig() {
+  for (unsigned int t = 0; t < sizeof(storage); t++)
+    EEPROM.write(CONFIG_START + t, *((char*)&storage + t));
 }
 
 //Hace la lectura del sensor
@@ -194,11 +217,11 @@ void takeReading() {
 
   //Si se reciben datos RF entonces priorizar su utilizacion
   if (rfStatus) {
-    rawValue = rfReading - tareValue;
+    rawValue = rfReading - storage.tareValue;
   }
 
-  float vf = (float) rawValue / (1023 - tareValue); // Valor normalizado
-  vf = multiplierValue * vf;                        // Valor multiplicado
+  float vf = (float) rawValue / (1023 - storage.tareValue); // Valor normalizado
+  vf = storage.multiplierValue * vf;                        // Valor multiplicado
   vf = vi + (vf - vi) * 0.1;                        // Valor Filtrado
   uvIntensity = 100 * vf;                           // Valor normalizado a 100
   vi = vf;                                          // Necesario para el Filtrado
@@ -314,7 +337,7 @@ void render() {
 
 //Sonar el buzzer si el valor de la dosis limite es superada y si el buzzer está activado
 void beep () {
-  if (cumulatedUV > memoryCumUV) {
+  if (cumulatedUV > storage.memoryCumUV) {
     if (buzzStatus) {
       tone(buzzerPin, 440, 200);
     }
@@ -385,11 +408,12 @@ void loop() {
     //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
     digitalWrite(lcdLightPin, HIGH);
     tone(buzzerPin, note[kp], 200);
+
+    if (*buttonFunctionPtrs[kp + displayMode * NUM_KEYS]) {
+      (*buttonFunctionPtrs[kp + displayMode * NUM_KEYS])();
+    }
   }
 
-  if (*buttonFunctionPtrs[kp][displayMode]) {
-    (*buttonFunctionPtrs[kp][displayMode])();
-  }
 
   if (millis() - fdb.lastKeypress > 30 * 1000) {
     digitalWrite(lcdLightPin, LOW);
@@ -400,7 +424,7 @@ void loop() {
 
 //Mostrar informacion de los tiempos en el display
 void renderTime() {
-  unsigned long int eta = now() * memoryCumUV / cumulatedUV;
+  unsigned long int eta = now() * storage.memoryCumUV / cumulatedUV;
   long int etl = eta - now();
 
   printTitle("TIMINGS");
@@ -415,7 +439,7 @@ void renderTime() {
   }
 
   printTime("ESTI: ", hour(eta), minute(eta), second(eta));
-  renderProgress(43, 100 * cumulatedUV / memoryCumUV);
+  renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
 
 //mostrar los valores actuales de Intensidad UV en el display
@@ -440,11 +464,17 @@ void renderBatteryInfo() {
   printField("-RX:", constrain(map(localBatteryLevel, 2700, 5000, 0, 100), 0, 100), "%");
 }
 
+void renderConfig() {
+  printTitle("CONFIG");
+  printField("TARE:", storage.tareValue);
+  printField("MULTIPLIER:", storage.multiplierValue);
+}
+
 void renderDosis() {
   printTitle("DOSIS");
-  printField("CURR:", cumulatedUV, "");
-  printField("TARG:", memoryCumUV, "");
-  printField("PERC:", (100 * cumulatedUV / memoryCumUV), "%");
-  renderProgress(43, 100 * cumulatedUV / memoryCumUV);
+  printField("CURR:", cumulatedUV);
+  printField("TARG:", storage.memoryCumUV);
+  printField("PERC:", (100 * cumulatedUV / storage.memoryCumUV), "%");
+  renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
 
