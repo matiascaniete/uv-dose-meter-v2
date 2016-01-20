@@ -6,6 +6,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 #include <VirtualWire.h>
+#include <FiveDegreeButton.h>
 
 // Software SPI (slower updates, more flexible pin options):
 // pin 7 - Serial clock out (SCLK)
@@ -35,8 +36,8 @@ unsigned int maxUV = 0;                         //Valor máximo de la Intensidad
 unsigned int tareValue = 200;                   //"Valor zero" de calibración del sensor UV
 unsigned int multiplierValue = 05;              //Factor de multiplicacion del valor de entrada
 unsigned long int lastRFReading;                //Tiempo de la ultima lectura RF
-unsigned long int lastKeypress;                 //Tiempo de la ultima keypressed
 int rawValue;                                   //Valor crudo de la lectura
+unsigned int localBatteryLevel = 0;             //Valor Vcc
 
 char StringReceived[22];                        //Valor crudo de la ultima lectura RF
 
@@ -46,8 +47,11 @@ int rfCounter;                                  //Valor del contador de paquetes
 int rfLocalCounter = 0;                         //Valor del contador local de paquetes, para el control de paquetes perdidos.
 int rfSignalQuality = 0;                        //Valor de la calidad de señal en funcion de los paquetes perdidos,
 
+unsigned long int rfMissing = 0;
+
 float vi = 0;
 
+int note[7] = {440, 493, 523, 587, 659, 698, 784};
 byte buzzStatus = 0;                            //Indica si debe sonar el buzzer cuando la dosis limite es alcanzada
 byte rfStatus = 0;                              //Indica si se están recibiendo datos desde el receptor RF
 
@@ -65,38 +69,12 @@ int  displayMode = 2;                           //Indica el modo de visualizacio
 #define MAX_DISPLAY_MODES 5                     //Número de modos de visualización.
 
 Timer t;                                        //Inicializacion del timer
+FiveDegreeButton fdb = FiveDegreeButton(joystickPin);
 
-//keypad debounce parameter
-#define DEBOUNCE_MAX 15
-#define DEBOUNCE_ON  10
-#define DEBOUNCE_OFF 3
-
-#define NUM_KEYS 5
-
-// joystick number
-#define LEFT_KEY 0
-#define CENTER_KEY 1
-#define DOWN_KEY 2
-#define RIGHT_KEY 3
-#define UP_KEY 4
-
-int  adc_key_val[5] = {
-  50, 200, 400, 600, 800
-};
-
-// debounce counters
-byte button_count[NUM_KEYS];
-// button status - pressed/released
-byte button_status[NUM_KEYS];
-// button on flags for user program
-byte button_flag[NUM_KEYS];
-
-unsigned long buttonFlasher = 0;
-
-void (*buttonFunctionPtrs[NUM_KEYS][MAX_DISPLAY_MODES])(); //the array of function pointers for buttons
+void (*buttonFunctionPtrs[MAX_DISPLAY_MODES][NUM_KEYS])(); //the array of function pointers for buttons
 void (*renderFunctionPtrs[MAX_DISPLAY_MODES])(); //the array of function pointers for diplay
 
-void setup()   {
+void setup() {
   display.begin();
 
   // you can change the contrast around to adapt the display for the best viewing!
@@ -124,8 +102,8 @@ void setup()   {
   //Hacer una lectura del valor UV 10 veces por segundo
   t.every(100, takeReading);
 
-  //Actualizar la informacion mostrada en pantalla 10 veces por segundo
-  t.every(500, render);
+  //Actualizar la informacion mostrada en pantalla
+  t.every(250, render);
 
   //Sonar el buzzer cada 2 segundos (si se ha superado la Dosis limite)
   t.every(2000, beep);
@@ -135,8 +113,8 @@ void setup()   {
   //Lee el valor en memoria de la Dosis limite
   retrieveMemoryCumUV();
 
-  Serial.begin(9600);  // Debugging only
-  Serial.println("setup");
+  //Serial.begin(9600);  // Debugging only
+  //Serial.println("setup");
 
   // Init del receptor RF
   vw_set_rx_pin(rxPin);
@@ -150,13 +128,33 @@ void setup()   {
 
   buttonFunctionPtrs[CENTER_KEY][DM_INTENSITY] = resetCounter;
   buttonFunctionPtrs[CENTER_KEY][DM_TIMES] = resetCounter;
+  buttonFunctionPtrs[CENTER_KEY][DM_RF_INFO] = resetRF;
+
+  for (byte i = 0; i < MAX_DISPLAY_MODES; i++) {
+    buttonFunctionPtrs[RIGHT_KEY][i] = increaseMenu;
+    buttonFunctionPtrs[LEFT_KEY][i] = decreaseMenu;
+  }
 
   renderFunctionPtrs[DM_TIMES] = renderTime;
   renderFunctionPtrs[DM_DOSIS] = renderDosis;
   renderFunctionPtrs[DM_INTENSITY] = renderUV;
   renderFunctionPtrs[DM_RF_INFO] = renderRFInfo;
+  renderFunctionPtrs[DM_BT_INFO] = renderBatteryInfo;
 }
 
+void increaseMenu() {
+  displayMode++;
+  if (displayMode > MAX_DISPLAY_MODES - 1) {
+    displayMode = 0;
+  }
+}
+
+void decreaseMenu() {
+  displayMode--;
+  if (displayMode < 0) {
+    displayMode = MAX_DISPLAY_MODES - 1;
+  }
+}
 void increaseTargetDosis() {
   memoryCumUV++;
 }
@@ -173,7 +171,10 @@ void resetCounter() {
   nReadings = 0;
   minUV = 1023;
   maxUV = 0;
-  tone(buzzerPin, 1000, 100);
+}
+
+void resetRF() {
+  rfMissing = 0;
 }
 
 //Obtener el valor almacenado en la memoria EEPROM de la Dosis limite
@@ -186,7 +187,6 @@ void storeMemoryCumUV() {
   //memoryCumUV = cumulatedUV;
   EEPROM.put(0, memoryCumUV);
 }
-
 
 //Hace la lectura del sensor
 void takeReading() {
@@ -215,6 +215,8 @@ void takeReading() {
   if (maxUV < uvIntensity) {
     maxUV = uvIntensity;
   }
+
+  localBatteryLevel = readVcc();
 }
 
 // utility function for digital clock display: prints preceding colon and leading 0
@@ -225,12 +227,12 @@ void printDigits(int digits) {
   display.print(digits);
 }
 
-void printTitle(String title) {
+void printTitle(char* title) {
   display.println(title);
   display.println("");
 }
 
-void printField(String label, String value, String suffix = "") {
+void printField(char* label, char* value, char* suffix) {
   display.print(label);
   display.print(value);
   if (suffix) {
@@ -240,7 +242,27 @@ void printField(String label, String value, String suffix = "") {
   display.println();
 }
 
-void printTime(String label, int h, int m, int s) {
+void printField(char* label, char* value) {
+  display.print(label);
+  display.print(value);
+  display.println();
+}
+
+void printField(char* label, int value, char* suffix) {
+  display.print(label);
+  display.print(value);
+  display.print(" ");
+  display.print(suffix);
+  display.println();
+}
+
+void printField(char* label, int value) {
+  display.print(label);
+  display.print(value);
+  display.println();
+}
+
+void printTime(char* label, int h, int m, int s) {
   display.print(label);
   display.print(h);
   printDigits(m);
@@ -302,48 +324,10 @@ void beep () {
 void resetRFQualityCounter() {
   rfSignalQuality = rfLocalCounter;
   rfLocalCounter = 0;
-}
-
-// which includes DEBOUNCE ON/OFF mechanism, and continuous pressing detection
-// Convert ADC value to key number
-char get_key(unsigned int input) {
-  char k;
-  for (k = 0; k < NUM_KEYS; k++) {
-    if (input < adc_key_val[k]) {
-      return k;
-    }
+  if (millis() - lastRFReading > 1 * 1000) {
+    rfMissing++;
   }
 
-  if (k >= NUM_KEYS)
-    k = -1;     // No valid key pressed
-
-  return k;
-}
-
-void update_adc_key() {
-  int adc_key_in = analogRead(joystickPin);
-  char key_in = get_key(adc_key_in);
-  for (byte i = 0; i < NUM_KEYS; i++) {
-    if (key_in == i) { //one key is pressed
-      if (button_count[i] < DEBOUNCE_MAX) {
-        button_count[i]++;
-        if (button_count[i] > DEBOUNCE_ON) {
-          if (button_status[i] == 0) {
-            button_flag[i] = 1;
-            button_status[i] = 1; //button debounced to 'pressed' status
-          }
-        }
-      }
-    } else { // no button pressed
-      if (button_count[i] > 0) {
-        button_flag[i] = 0;
-        button_count[i]--;
-        if (button_count[i] < DEBOUNCE_OFF) {
-          button_status[i] = 0; //button debounced to 'released' status
-        }
-      }
-    }
-  }
 }
 
 long readVcc() {
@@ -383,7 +367,6 @@ void loop() {
     }
 
     int readStatus = sscanf(StringReceived, "%d,%d,%d,", &rfReading, &rfCounter, &rfBatteryLevel); // Converts a string to an array
-
     rfLocalCounter++;
 
     rfStatus = 1;
@@ -397,48 +380,18 @@ void loop() {
     rfStatus = 0;
   }
 
-  for (byte i = 0; i < NUM_KEYS; i++) {
-    if (button_status[i] != 0) {
-      if (*buttonFunctionPtrs[i][displayMode]) {
-        //(*buttonFunctionPtrs[i][displayMode])();
-        //delay(10);
-      }
-    }
-
-    if (button_flag[i] != 0) {
-      button_flag[i] = 0; // reset button flag
-
-      //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
-      digitalWrite(lcdLightPin, HIGH);
-      lastKeypress = millis();
-
-      if (*buttonFunctionPtrs[i][displayMode]) {
-        (*buttonFunctionPtrs[i][displayMode])();
-      }
-
-      switch (i) {
-        case LEFT_KEY:
-          displayMode --;
-          if (displayMode < 0) {
-            displayMode = MAX_DISPLAY_MODES - 1;
-          }
-          break;
-        case RIGHT_KEY:
-          displayMode ++;
-          if (displayMode > MAX_DISPLAY_MODES - 1) {
-            displayMode = 0;
-          }
-          break;
-      }
-    }
+  int kp = fdb.update();
+  if (kp >= 0) {
+    //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
+    digitalWrite(lcdLightPin, HIGH);
+    tone(buzzerPin, note[kp], 200);
   }
 
-  if (millis() - buttonFlasher > 5) {
-    update_adc_key();
-    buttonFlasher = millis();
+  if (*buttonFunctionPtrs[kp][displayMode]) {
+    (*buttonFunctionPtrs[kp][displayMode])();
   }
 
-  if (millis() - lastKeypress > 30 * 1000) {
+  if (millis() - fdb.lastKeypress > 30 * 1000) {
     digitalWrite(lcdLightPin, LOW);
   }
 
@@ -451,41 +404,47 @@ void renderTime() {
   long int etl = eta - now();
 
   printTitle("TIMINGS");
-  printTime("CURR:", hour(), minute(), second());
+  printTime("CURR: ", hour(), minute(), second());
 
   if (etl < 0) {
-    String v = ((second() % 2) == 0) ? "0:00:00" : "-:--:--";
-    printField("LEFT:", v);
+    char v1[] = "0:00:00";
+    char v2[] = "-:--:--";
+    printField("LEFT: ", ((second() % 2) == 0) ? v1 : v2);
   } else {
-    printTime("LEFT:", hour(etl), minute(etl), second(etl));
+    printTime("LEFT: ", hour(etl), minute(etl), second(etl));
   }
 
-  printTime("ESTI:", hour(eta), minute(eta), second(eta));
+  printTime("ESTI: ", hour(eta), minute(eta), second(eta));
   renderProgress(43, 100 * cumulatedUV / memoryCumUV);
 }
 
 //mostrar los valores actuales de Intensidad UV en el display
 void renderUV() {
   printTitle("UV-VALUES");
-  printField("MIN :", String(minUV));
-  printField("CURR:", String(uvIntensity));
-  printField("MAX :", String(maxUV));
+  printField("MIN :", minUV);
+  printField("CURR:", uvIntensity);
+  printField("MAX :", maxUV);
   renderProgress(43, 100 * uvIntensity / 100);
 }
 
 void renderRFInfo() {
   printTitle("RF-INFO");
-  printField("SIGNAL Q:", String(rfSignalQuality));
-  printField("UV-VALUE:", String(rfReading));
-  printField("BAT-TX:", String(constrain(map(rfBatteryLevel, 2700, 5000, 0, 100), 0 , 100)), "%");
-  printField("BAT-RX:", String(constrain(map(readVcc(), 2700, 5000, 0, 100), 0, 100)), "%");
+  printField("SIGNAL Q:", rfSignalQuality);
+  printField("MISSED P:", rfMissing);
+  printField("UV-VALUE:", rfReading);
+}
+
+void renderBatteryInfo() {
+  printTitle("BATTERY");
+  printField("-TX:", constrain(map(rfBatteryLevel, 2700, 5000, 0, 100), 0 , 100), "%");
+  printField("-RX:", constrain(map(localBatteryLevel, 2700, 5000, 0, 100), 0, 100), "%");
 }
 
 void renderDosis() {
   printTitle("DOSIS");
-  printField("CURR:", String(cumulatedUV));
-  printField("TARG:", String(memoryCumUV));
-  printField("PERC:", String(100 * cumulatedUV / memoryCumUV), "%");
+  printField("CURR:", cumulatedUV, "");
+  printField("TARG:", memoryCumUV, "");
+  printField("PERC:", (100 * cumulatedUV / memoryCumUV), "%");
   renderProgress(43, 100 * cumulatedUV / memoryCumUV);
 }
 
