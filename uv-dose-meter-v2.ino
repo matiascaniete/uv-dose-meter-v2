@@ -47,7 +47,7 @@ int rfSignalQuality = 0;                        //Valor de la calidad de señal 
 unsigned long int rfMissing = 0;
 
 // ID of the settings block
-#define CONFIG_VERSION "vs2"
+#define CONFIG_VERSION "vs5"
 
 // Tell it where to store your config data in EEPROM
 #define CONFIG_START 32
@@ -62,9 +62,9 @@ struct StoreStruct {
   unsigned long int memoryCumUV;          //Dosis límite almacenada en memoria EEPROM
 } storage = {
   CONFIG_VERSION,
-  202,
-  10,
-  100
+  206,
+  20,
+  2000
 };
 
 float vi = 0;
@@ -79,16 +79,17 @@ byte rfStatus = 0;                              //Indica si se están recibiendo
 #define DM_RF_INFO        3       //Mostrar RF info
 #define DM_BT_INFO        4       //Mostrar informacion de baterias
 #define DM_CONFIG_INFO    5       //Mostrar valores de configuracion
-#define MAX_DISPLAY_MODES 6       //Número de modos de visualización.
+#define DM_DASHBOARD      6       //Mostrar valores de configuracion
+#define MAX_DISPLAY_MODES 7       //Número de modos de visualización.
 
 //Indica el modo de visualizacion actual
-int  displayMode = DM_TIMES;
+int  displayMode = DM_DASHBOARD;
 
 Timer t;                                        //Inicializacion del timer
 FiveDegreeButton fdb = FiveDegreeButton(joystickPin);
 
-void (*buttonFunctionPtrs[MAX_DISPLAY_MODES * NUM_KEYS])(); //the array of function pointers for buttons
-void (*renderFunctionPtrs[MAX_DISPLAY_MODES])(); //the array of function pointers for display
+void (*buttonFunctionPtrs[NUM_KEYS][MAX_DISPLAY_MODES])() = {NULL}; //the array of function pointers for buttons
+void (*renderFunctionPtrs[MAX_DISPLAY_MODES])() = {NULL}; //the array of function pointers for display
 
 void setup() {
   display.begin();
@@ -135,26 +136,27 @@ void setup() {
   vw_rx_start();        // Start the receiver PLL running
 
   // Definicion de los punteros de funciones de manejo de botones de navegacion y renderizacion
+  buttonFunctionPtrs[UP_KEY][DM_DOSIS] = &increaseTargetDosis;
+  buttonFunctionPtrs[DOWN_KEY][DM_DOSIS] = &decreaseTargetDosis;
+  buttonFunctionPtrs[CENTER_KEY][DM_DOSIS] = &saveConfig;
 
-  buttonFunctionPtrs[UP_KEY + NUM_KEYS * DM_DOSIS] = increaseTargetDosis;
-  buttonFunctionPtrs[DOWN_KEY + NUM_KEYS * DM_DOSIS] = decreaseTargetDosis;
-  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_DOSIS] = saveConfig;
-
-  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_INTENSITY] = resetCounter;
-  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_TIMES] = resetCounter;
-  buttonFunctionPtrs[CENTER_KEY + NUM_KEYS * DM_RF_INFO] = resetRF;
+  buttonFunctionPtrs[CENTER_KEY][DM_INTENSITY] = &resetCounter;
+  buttonFunctionPtrs[CENTER_KEY][DM_TIMES] = &resetCounter;
+  buttonFunctionPtrs[CENTER_KEY][DM_RF_INFO] = &resetRF;
+  buttonFunctionPtrs[CENTER_KEY][DM_DASHBOARD] = &resetCounter;
 
   for (byte i = 0; i < MAX_DISPLAY_MODES; i++) {
-    buttonFunctionPtrs[RIGHT_KEY + i * NUM_KEYS] = increaseMenu;
-    buttonFunctionPtrs[LEFT_KEY + i * NUM_KEYS] = decreaseMenu;
+    buttonFunctionPtrs[RIGHT_KEY][i] = &increaseMenu;
+    buttonFunctionPtrs[LEFT_KEY][i] = &decreaseMenu;
   }
 
-  renderFunctionPtrs[DM_TIMES] = renderTime;
-  renderFunctionPtrs[DM_DOSIS] = renderDosis;
-  renderFunctionPtrs[DM_INTENSITY] = renderUV;
-  renderFunctionPtrs[DM_RF_INFO] = renderRFInfo;
-  renderFunctionPtrs[DM_BT_INFO] = renderBatteryInfo;
-  renderFunctionPtrs[DM_CONFIG_INFO] = renderConfig;
+  renderFunctionPtrs[DM_TIMES] = &renderTime;
+  renderFunctionPtrs[DM_DOSIS] = &renderDosis;
+  renderFunctionPtrs[DM_INTENSITY] = &renderUV;
+  renderFunctionPtrs[DM_RF_INFO] = &renderRFInfo;
+  renderFunctionPtrs[DM_BT_INFO] = &renderBatteryInfo;
+  renderFunctionPtrs[DM_CONFIG_INFO] = &renderConfig;
+  renderFunctionPtrs[DM_DASHBOARD] = &renderDashboard;
 
   Serial.begin(9600);  // Debugging only
   Serial.println("setup");
@@ -165,6 +167,7 @@ void increaseMenu() {
   if (displayMode > MAX_DISPLAY_MODES - 1) {
     displayMode = 0;
   }
+  //Serial.println(displayMode);
 }
 
 void decreaseMenu() {
@@ -172,6 +175,7 @@ void decreaseMenu() {
   if (displayMode < 0) {
     displayMode = MAX_DISPLAY_MODES - 1;
   }
+  //Serial.println(displayMode);
 }
 void increaseTargetDosis() {
   storage.memoryCumUV++;
@@ -218,6 +222,9 @@ void takeReading() {
   //Si se reciben datos RF entonces priorizar su utilizacion
   if (rfStatus) {
     rawValue = rfReading - storage.tareValue;
+    if (rawValue < 0) {
+      rawValue = 0;
+    }
   }
 
   float vf = (float) rawValue / (1023 - storage.tareValue); // Valor normalizado
@@ -328,8 +335,8 @@ void render() {
 
   display.setCursor(0, 0);
 
-  if (*renderFunctionPtrs[displayMode]) {
-    (*renderFunctionPtrs[displayMode])();
+  if (renderFunctionPtrs[displayMode]) {
+    (renderFunctionPtrs[displayMode])();
   }
 
   display.display();
@@ -407,10 +414,13 @@ void loop() {
   if (kp >= 0) {
     //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
     digitalWrite(lcdLightPin, HIGH);
-    tone(buzzerPin, note[kp], 200);
+    //No poner mas de 10ms de duración, sino crashes
+    tone(buzzerPin, note[kp], 10);
 
-    if (*buttonFunctionPtrs[kp + displayMode * NUM_KEYS]) {
-      (*buttonFunctionPtrs[kp + displayMode * NUM_KEYS])();
+    if ((kp < NUM_KEYS) && (displayMode < MAX_DISPLAY_MODES) && (displayMode >= 0)) {
+      if (buttonFunctionPtrs[kp][displayMode]) {
+        buttonFunctionPtrs[kp][displayMode]();
+      }
     }
   }
 
@@ -475,6 +485,14 @@ void renderDosis() {
   printField("CURR:", cumulatedUV);
   printField("TARG:", storage.memoryCumUV);
   printField("PERC:", (100 * cumulatedUV / storage.memoryCumUV), "%");
+  renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
+}
+
+void renderDashboard() {
+  printTitle("DASHBOARD");
+  printField("UV-INTS:", uvIntensity);
+  printField("UV-DOSE:", cumulatedUV);
+  printTime("TIME: ", hour(), minute(), second());
   renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
 
