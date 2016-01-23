@@ -251,7 +251,6 @@ void takeReading() {
 
 // utility function for digital clock display: prints preceding colon and leading 0
 void printDigits(int digits) {
-  display.print(":");
   if (digits < 10)
     display.print('0');
   display.print(digits);
@@ -265,7 +264,7 @@ void printTitle(char* title) {
 void printField(char* label, char* value, char* suffix) {
   display.print(label);
   display.print(value);
-  if (suffix) {
+  if (suffix != "") {
     display.print(" ");
     display.print(suffix);
   }
@@ -273,29 +272,29 @@ void printField(char* label, char* value, char* suffix) {
 }
 
 void printField(char* label, char* value) {
-  display.print(label);
-  display.print(value);
-  display.println();
+  printField(label, value, "");
 }
 
 void printField(char* label, int value, char* suffix) {
   display.print(label);
   display.print(value);
-  display.print(" ");
-  display.print(suffix);
+  if (suffix != "") {
+    display.print(" ");
+    display.print(suffix);
+  }
   display.println();
 }
 
 void printField(char* label, int value) {
-  display.print(label);
-  display.print(value);
-  display.println();
+  printField(label, value, "");
 }
 
 void printTime(char* label, int h, int m, int s) {
   display.print(label);
-  display.print(h);
+  printDigits(h);
+  display.print(":");
   printDigits(m);
+  display.print(":");
   printDigits(s);
   display.println();
 }
@@ -412,21 +411,18 @@ void loop() {
 
   int kp = fdb.update();
   if (kp >= 0) {
-    //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 10 segundos
+    //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 30 segundos
     digitalWrite(lcdLightPin, HIGH);
+    if (millis() - fdb.lastKeypress > 30 * 1000) {
+      digitalWrite(lcdLightPin, LOW);
+    }
+
     //No poner mas de 10ms de duración, sino crashes
     tone(buzzerPin, note[kp], 10);
 
-    if ((kp < NUM_KEYS) && (displayMode < MAX_DISPLAY_MODES) && (displayMode >= 0)) {
-      if (buttonFunctionPtrs[kp][displayMode]) {
-        buttonFunctionPtrs[kp][displayMode]();
-      }
+    if (buttonFunctionPtrs[kp][displayMode]) {
+      buttonFunctionPtrs[kp][displayMode]();
     }
-  }
-
-
-  if (millis() - fdb.lastKeypress > 30 * 1000) {
-    digitalWrite(lcdLightPin, LOW);
   }
 
   t.update();
@@ -438,17 +434,17 @@ void renderTime() {
   long int etl = eta - now();
 
   printTitle("TIMINGS");
-  printTime("CURR: ", hour(), minute(), second());
+  printTime("CURR:", hour(), minute(), second());
 
   if (etl < 0) {
-    char v1[] = "0:00:00";
-    char v2[] = "-:--:--";
-    printField("LEFT: ", ((second() % 2) == 0) ? v1 : v2);
+    char v1[] = "00:00:00";
+    char v2[] = "--:--:--";
+    printField("LEFT:", ((second() % 2) == 0) ? v1 : v2);
   } else {
-    printTime("LEFT: ", hour(etl), minute(etl), second(etl));
+    printTime("LEFT:", hour(etl), minute(etl), second(etl));
   }
 
-  printTime("ESTI: ", hour(eta), minute(eta), second(eta));
+  printTime("ESTI:", hour(eta), minute(eta), second(eta));
   renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
 
@@ -492,7 +488,7 @@ void renderDashboard() {
   printTitle("DASHBOARD");
   printField("UV-INTS:", uvIntensity);
   printField("UV-DOSE:", cumulatedUV);
-  printTime("TIME: ", hour(), minute(), second());
+  printTime("TIME:", hour(), minute(), second());
   renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
 
