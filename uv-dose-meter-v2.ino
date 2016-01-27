@@ -178,11 +178,11 @@ void decreaseMenu() {
   //Serial.println(displayMode);
 }
 void increaseTargetDosis() {
-  storage.memoryCumUV++;
+  storage.memoryCumUV += 50;
 }
 
 void decreaseTargetDosis() {
-  storage.memoryCumUV--;
+  storage.memoryCumUV -= 50;
 }
 
 //Reset de variables
