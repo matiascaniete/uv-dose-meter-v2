@@ -413,9 +413,6 @@ void loop() {
   if (kp >= 0) {
     //Enciende la luz trasera al pulsar cualquier boton y se apaga luego de 30 segundos
     digitalWrite(lcdLightPin, HIGH);
-    if (millis() - fdb.lastKeypress > 30 * 1000) {
-      digitalWrite(lcdLightPin, LOW);
-    }
 
     //No poner mas de 10ms de duración, sino crashes
     tone(buzzerPin, note[kp], 10);
@@ -423,6 +420,11 @@ void loop() {
     if (buttonFunctionPtrs[kp][displayMode]) {
       buttonFunctionPtrs[kp][displayMode]();
     }
+
+  }
+
+  if (millis() - fdb.lastKeypress > 30 * 1000) {
+    digitalWrite(lcdLightPin, LOW);
   }
 
   t.update();
