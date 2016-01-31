@@ -91,6 +91,9 @@ FiveDegreeButton fdb = FiveDegreeButton(joystickPin);
 void (*buttonFunctionPtrs[NUM_KEYS][MAX_DISPLAY_MODES])() = {NULL}; //the array of function pointers for buttons
 void (*renderFunctionPtrs[MAX_DISPLAY_MODES])() = {NULL}; //the array of function pointers for display
 
+String inputString = "";         // a string to hold incoming data
+boolean stringComplete = false;  // whether the string is complete
+
 void setup() {
   display.begin();
 
@@ -160,6 +163,10 @@ void setup() {
 
   Serial.begin(9600);  // Debugging only
   Serial.println("setup");
+  Serial.println("Type 'ls' for commands");
+
+  // reserve 200 bytes for the inputString:
+  inputString.reserve(200);
 }
 
 void increaseMenu() {
@@ -427,7 +434,50 @@ void loop() {
     digitalWrite(lcdLightPin, LOW);
   }
 
+  if (stringComplete) {
+    doTheAction(inputString);
+    // clear the string:
+    inputString = "";
+    stringComplete = false;
+  }
+
   t.update();
+}
+
+void serialEvent() {
+  while (Serial.available()) {
+    // get the new byte:
+    char inChar = (char)Serial.read();
+    // add it to the inputString:
+    inputString += inChar;
+    // if the incoming character is a newline, set a flag
+    // so the main loop can do something about it:
+    if (inChar == '\n') {
+      stringComplete = true;
+    }
+  }
+}
+
+void doTheAction(String& action) {
+  action.trim();
+  
+  if (action == "ls") {
+    Serial.println("get uv");
+    Serial.println("get dosis");
+    Serial.println("reset");
+  }
+  if (action == "get uv") {
+    Serial.println(uvIntensity);
+  }
+  if (action == "get dosis") {
+    Serial.println(cumulatedUV);
+  }
+  if (action == "reset") {
+    tone(buzzerPin, 440, 200);
+    resetCounter();
+    Serial.println("UV Counter reseted");
+  }
+
 }
 
 //Mostrar informacion de los tiempos en el display
