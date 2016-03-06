@@ -544,14 +544,14 @@ void renderDashboard() {
   display.print(maxUV);
   display.println();
   
-  display.print("D:");
+  display.print("DS:");
   display.print(cumulatedUV);
   display.print("/");
   display.print(storage.memoryCumUV);
   display.println();
 
   unsigned long int eta = now() * storage.memoryCumUV / cumulatedUV;  
-  printTime("ESTI:", hour(eta), minute(eta), second(eta));
+  printTime("ETA:", hour(eta), minute(eta), second(eta));
 
   renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
