@@ -538,9 +538,21 @@ void renderDosis() {
 
 void renderDashboard() {
   printTitle("DASHBOARD");
-  printField("UV-INTS:", uvIntensity);
-  printField("UV-DOSE:", cumulatedUV);
-  printTime("TIME:", hour(), minute(), second());
+  display.print("UV:");
+  display.print(minUV);
+  display.print("/");
+  display.print(maxUV);
+  display.println();
+  
+  display.print("D:");
+  display.print(cumulatedUV);
+  display.print("/");
+  display.print(storage.memoryCumUV);
+  display.println();
+
+  unsigned long int eta = now() * storage.memoryCumUV / cumulatedUV;  
+  printTime("ESTI:", hour(eta), minute(eta), second(eta));
+
   renderProgress(43, 100 * cumulatedUV / storage.memoryCumUV);
 }
 
