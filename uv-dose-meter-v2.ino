@@ -130,6 +130,8 @@ void setup() {
 
   t.every(1000, resetRFQualityCounter);
 
+  t.after(5000, sonarBeep);
+
   //Lee el valor en memoria de la configuracion
   loadConfig();
 
@@ -355,6 +357,16 @@ void beep () {
       tone(buzzerPin, 440, 200);
     }
   }
+}
+
+//Sonar el buzzer "Sonar", mayor frecuencia cuanto mas cerca del target se está.
+void sonarBeep () {
+  int period = 10000 - (10000 * cumulatedUV / storage.memoryCumUV);
+  if (period < 100) {
+    period = 100;
+  }
+  t.after(period, sonarBeep);
+  tone(buzzerPin, 2000, 25);
 }
 
 void resetRFQualityCounter() {
